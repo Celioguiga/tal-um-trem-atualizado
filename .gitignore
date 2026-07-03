@@ -3,6 +3,7 @@
 
 # === UN-IGNORE project files ===
 !/.gitignore
+!/README.md
 !/CLAUDE.md
 !/biblia_cromus.md
 !/cromus_studio.py
