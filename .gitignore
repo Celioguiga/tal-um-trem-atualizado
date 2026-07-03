@@ -1,0 +1,42 @@
+# Ignore EVERYTHING in home directory
+/*
+
+# === UN-IGNORE project files ===
+!/.gitignore
+!/CLAUDE.md
+!/biblia_cromus.md
+!/cromus_studio.py
+!/pipeline.py
+!/cromus_header.ily
+!/rnfg_header.ily
+!/cantiga_rules.md
+!/correcoes_sintaxe.md
+!/noteformpro_mcp.py
+!/verify_setup.py
+
+# === UN-IGNORE backup .py (just these) ===
+!/cromus_studio_FUNCIONANDO_backup.py
+!/cromus_studio_audio_OK.py
+!/cromus_studio_QUEBRADO.py
+
+# === UN-IGNORE directories (with all contents) ===
+!/scores/
+!/scores/**
+!/biblia_versoes/
+!/biblia_versoes/**
+!/backups_studio/
+!/backups_studio/**
+!/output/
+!/output/**
+
+# Exceptions inside tracked dirs
+**/__pycache__/
+**/*.pyc
+.DS_Store
+*.log
+
+# Sensitive files
+.anthropic_env
+.env
+*.key
+id_*

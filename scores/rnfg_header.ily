@@ -1,0 +1,25 @@
+% ── SEUS STENCILS VETORIAIS REAIS (CROMUS v2.0) ─────────────
+#(define (stencil-do grob)  (stencil-with-color (make-ellipse-stencil 0.56 0.56 0.08 #t) (rgb-color 0.898 0.224 0.208)))
+#(define (stencil-re grob)  (stencil-with-color (make-path-stencil '(moveto -0.68 0.00 curveto -0.10 0.58 0.10 0.58 0.68 0.00 curveto 0.10 -0.58 -0.10 -0.58 -0.68 0.00 closepath) 0.08 1 1 #t) (rgb-color 0.976 0.659 0.145)))
+#(define (stencil-mi grob)  (stencil-with-color (make-path-stencil '(moveto 0.00 0.58 lineto 0.56 -0.44 lineto -0.56 -0.44 closepath) 0.08 1 1 #t) (rgb-color 0.937 0.424 0.000)))
+#(define (stencil-fa grob)  (stencil-with-color (make-path-stencil '(moveto -0.46 -0.46 lineto 0.46 -0.46 lineto 0.46 0.46 lineto -0.46 0.46 closepath) 0.08 1 1 #t) (rgb-color 0.180 0.490 0.196)))
+#(define (stencil-sol grob) (stencil-with-color (make-path-stencil '(moveto 0.000 -0.600 lineto 0.149 -0.205 lineto 0.570 -0.195 lineto 0.241 0.083 lineto 0.353 0.485 lineto 0.000 0.250 lineto -0.353 0.485 lineto -0.241 0.083 lineto -0.570 -0.195 lineto -0.149 -0.205 closepath) 0.08 1 1 #t) (rgb-color 0.082 0.396 0.753)))
+#(define (stencil-la grob)  (stencil-with-color (make-path-stencil '(moveto 0.540 0.000 lineto 0.270 0.467 lineto -0.270 0.467 lineto -0.540 0.000 lineto -0.270 -0.467 lineto 0.270 -0.467 closepath) 0.08 1 1 #t) (rgb-color 0.784 0.588 0.047)))
+#(define (stencil-si grob)  (stencil-with-color (make-path-stencil '(moveto 0.000 0.600 lineto 0.540 0.050 lineto 0.460 0.050 lineto 0.460 -0.420 lineto -0.460 -0.420 lineto -0.460 0.050 lineto -0.540 0.050 closepath) 0.08 1 1 #t) (rgb-color 0.482 0.122 0.635)))
+
+% ── MOTOR DINÂMICO DE ALTURA PARA FORMA ─────────────────────
+#(define (aplicar-forma-por-altura grob)
+   (let* ((event (event-cause grob))
+          (pitch (ly:event-property event 'pitch')))
+     (if (ly:pitch? pitch)
+         (let ((grau (ly:pitch-notename pitch)))
+           (cond
+            ((equal? grau 0) (stencil-do grob))   
+            ((equal? grau 1) (stencil-re grob))   
+            ((equal? grau 2) (stencil-mi grob))   
+            ((equal? grau 3) (stencil-fa grob))   
+            ((equal? grau 4) (stencil-sol grob))  
+            ((equal? grau 5) (stencil-la grob))   
+            ((equal? grau 6) (stencil-si grob))   
+            (else (ly:note-head::print grob))))
+         (ly:note-head::print grob))))
