@@ -1,7 +1,7 @@
 # CLAUDE.md — CONTEXTO OPERACIONAL · CROMUS STUDIO / MOTOR CROMUS v2.1
 > Synemusic · Executor único: Célio Guiga (Solo-Orchestra)
 > Este arquivo é lido automaticamente pelo Claude Code em toda sessão nesta pasta.
-> Última consolidação: 2026-06-14 (durações por contexto + quiálteras + layout redimensionável)
+> Última consolidação: 2026-07-03 (Prompt Mestre v10.6 + CLI synemusic)
 
 ---
 
@@ -13,16 +13,18 @@ Princípio RNFG: cada nota tem **cor fixa**, cada grau tem **forma geométrica f
 
 ## 2. HIERARQUIA DE VERDADE (ordem de prevalência)
 
-1. **`~/biblia_cromus.md`** — A BÍBLIA. Fonte única de verdade da sintaxe, cores, formas e padrões. LEIA-A antes de qualquer tarefa que toque em regras, tradução ou renderização. Em conflito com qualquer outro arquivo ou documento, a Bíblia vence.
-2. `~/cromus_header.ily` — implementação canônica das formas (stencils). Deve estar 100% conforme a seção 3 da Bíblia.
-3. `~/pipeline.py` — motor canônico: gerar_ly(cantiga, saida_ly, modo) monta o .ly; compila REAL e FORMA.
-4. `~/cromus_studio.py` — o Studio (servidor local, porta 4242): interface, tradutor, modo admin, Bíblia, diálogo.
-5. `~/cantiga_rules.md` — LEGADO. Consultar apenas como histórico.
+1. **`~/prompt_mestre_synemusic_v10.6.md`** — O Prompt Mestre. Visão global do ecossistema Synemusic: MAESTRUM, camadas I–X, pricing, roadmap. LEIA antes de qualquer decisão estratégica ou nova feature.
+2. **`~/biblia_cromus.md`** — A BÍBLIA. Fonte única de verdade da sintaxe, cores, formas e padrões. LEIA-A antes de qualquer tarefa que toque em regras, tradução ou renderização. Em conflito com qualquer outro arquivo ou documento, a Bíblia vence.
+3. `~/cromus_header.ily` — implementação canônica das formas (stencils). Deve estar 100% conforme a seção 3 da Bíblia.
+4. `~/pipeline.py` — motor canônico: gerar_ly(cantiga, saida_ly, modo) monta o .ly; compila REAL e FORMA.
+5. `~/cromus_studio.py` — o Studio (servidor local, porta 4242): interface, tradutor, modo admin, Bíblia, diálogo.
+6. `~/synemusic/` — CLI unificada do ecossistema (em construção).
+7. `~/cantiga_rules.md` — LEGADO. Consultar apenas como histórico.
 
 ## 3. MAPA DE ARQUIVOS (home: /Users/celiopereira_synemusic)
 
 | Arquivo/pasta | Papel |
-|---|---|
+|---|---|---|
 | `cromus_studio.py` | Servidor do Studio. Endpoints: GET / (interface), POST /render, GET /pdf, GET+POST /biblia, POST /corrigir, POST /dialogo |
 | `pipeline.py` | Motor canônico de geração .ly + compilação LilyPond (NÃO modificar sem ordem explícita) |
 | `cromus_header.ily` | Stencils das 7 formas + engraver REAL/FORMA (copiado para studio_tmp a cada render — mudanças valem na renderização seguinte, sem reiniciar) |
@@ -32,6 +34,7 @@ Princípio RNFG: cada nota tem **cor fixa**, cada grau tem **forma geométrica f
 | `studio_tmp/` | Área de trabalho de compilação (descartável) |
 | `backups_studio/` | Cópias datadas do cromus_studio.py em estados estáveis |
 | `output/` | PDFs finais das cantigas gerados pelo pipeline |
+| `synemusic/` | CLI unificada do ecossistema: `synemusic studio`, `synemusic nfp`, etc. |
 
 ## 4. AMBIENTE
 
@@ -77,7 +80,7 @@ mkdir -p ~/backups_studio && cp ~/cromus_studio.py ~/backups_studio/cromus_studi
 **Ciclo de aprendizado do sistema:**
 render → dúvida/erro → aba Diálogo (editor propõe interpretações OU Guiga dita a correção) → decisão aplicada e registrada no caderno → correções recorrentes são promovidas a regra na Bíblia → tradutor é atualizado conforme a Bíblia.
 
-## 8. ESTADO ATUAL (2026-06-14)
+## 8. ESTADO ATUAL (2026-07-03)
 
 **Implementado em 14/06 (Cromus Studio v2.1):**
 - Conversor de DURAÇÕES POR CONTEXTO validado (9/9 testes): vírgula=tempo, asteriscos=parcelas, grades automáticas
@@ -88,6 +91,7 @@ render → dúvida/erro → aba Diálogo (editor propõe interpretações OU Gui
 - Painel de notas redimensionável à esquerda (resizer arrastável)
 - Áudio (Tone.js), exportação MIDI/WAV/.ly, importação PDF/MusicXML, undo/redo, busca inline, tema claro/escuro, log
 - Bíblia atualizada para 273 linhas com dicionário de conversão validado
+- CLI unificada `synemusic/` (Python) iniciada — subcomandos studio, nfp, live, transcribe, etc.
 
 **ATENÇÃO — lições de 14/06:** o Claude Code corrompeu o cromus_studio.py ao reescrevê-lo inteiro (estourou 32k tokens, reduziu para 104 linhas). SEMPRE usar str_replace pequeno + backup antes. Ver Bíblia seção 7 (tabela de erros resolvidos).
 

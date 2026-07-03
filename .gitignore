@@ -3,7 +3,12 @@
 
 # === UN-IGNORE project files ===
 !/.gitignore
+!/synemusic/
+!/synemusic/**
+!/synemusic/**/*
+!/synemusic.sh
 !/README.md
+!/prompt_mestre_synemusic_v10.6.md
 !/CLAUDE.md
 !/biblia_cromus.md
 !/cromus_studio.py
