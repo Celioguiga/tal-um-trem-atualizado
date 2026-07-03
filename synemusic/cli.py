@@ -23,6 +23,7 @@ def main():
     from synemusic.commands.krisicho import register as krisicho_cmd
     from synemusic.commands.cert import register as cert_cmd
     from synemusic.commands.config import register as config_cmd
+    from synemusic.commands.tab import register as tab_cmd
 
     studio_cmd(subparsers)
     nfp_cmd(subparsers)
@@ -34,6 +35,7 @@ def main():
     krisicho_cmd(subparsers)
     cert_cmd(subparsers)
     config_cmd(subparsers)
+    tab_cmd(subparsers)
 
     args = parser.parse_args()
 
@@ -56,6 +58,7 @@ def dispatch(args):
         "krisicho": "synemusic.commands.krisicho",
         "cert": "synemusic.commands.cert",
         "config": "synemusic.commands.config",
+        "tab": "synemusic.commands.tab",
     }
     mod = __import__(module[args.command], fromlist=["run"])
     mod.run(args)
