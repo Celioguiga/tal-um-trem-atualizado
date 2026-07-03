@@ -1,4 +1,6 @@
 import argparse
+import os
+import subprocess
 
 
 def register(subparsers):
@@ -7,9 +9,20 @@ def register(subparsers):
 
 
 def run(args):
+    nfp_dir = os.path.join(os.path.dirname(__file__), "..", "..", "nfp")
+    cwd = os.path.abspath(nfp_dir)
+
     if args.action == "dev":
-        print("→ npm run dev (Note Form Pro)")
+        print(f"→ cd nfp && npm run dev")
+        subprocess.run(["npm", "run", "dev"], cwd=cwd)
     elif args.action == "build":
-        print("→ npm run build (Note Form Pro)")
+        print("→ Compilando Note Form Pro…")
+        result = subprocess.run(["npm", "run", "build"], cwd=cwd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print("✓ Build concluído")
+        else:
+            print("✗ Erro no build:")
+            print(result.stderr)
     elif args.action == "start":
-        print("→ npm start (Note Form Pro)")
+        print("→ cd nfp && npx vite preview")
+        subprocess.run(["npx", "vite", "preview"], cwd=cwd)

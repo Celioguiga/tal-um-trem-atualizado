@@ -7,6 +7,14 @@
 !/synemusic/**
 !/synemusic/**/*
 !/synemusic.sh
+!/nfp/
+!/nfp/**
+!/nfp/**/*
+!/nfp/src/**/*
+!/nfp/public/**/*
+nfp/node_modules/
+nfp/dist/
+nfp/*.tsbuildinfo
 !/README.md
 !/prompt_mestre_synemusic_v10.6.md
 !/CLAUDE.md

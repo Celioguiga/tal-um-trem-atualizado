@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme {
+  --color-rng-do: #c0001a;
+  --color-rng-re: #ecd200;
+  --color-rng-mi: #f07300;
+  --color-rng-fa: #00b050;
+  --color-rng-sol: #0066ff;
+  --color-rng-la: #8b5e00;
+  --color-rng-si: #9b5fc0;
+}
