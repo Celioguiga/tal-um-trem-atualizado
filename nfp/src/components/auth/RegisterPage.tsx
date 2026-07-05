@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { LGPD_TERMS, LGPD_VERSION, hashIp } from "../../lib/lgpd";
+import { Logo } from "../brand/Logo";
 
 type ConsentState = {
   termos_de_uso: boolean;
@@ -70,10 +71,10 @@ export function RegisterPage() {
   return (
     <div className="min-h-screen bg-zinc-950 flex items-start justify-center px-4 py-12">
       <div className="w-full max-w-md space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-white">Note Form Pro</h1>
-          <p className="text-zinc-400 mt-2">Crie sua conta Synemusic</p>
-        </div>
+          <div className="text-center flex flex-col items-center">
+            <Logo size="lg" showTagline />
+            <p className="text-zinc-400 mt-4">Crie sua conta Synemusic</p>
+          </div>
 
         <form onSubmit={handleSubmit} className="bg-zinc-900 rounded-xl p-8 space-y-6 border border-zinc-800">
           <h2 className="text-xl font-semibold text-white">Cadastro</h2>

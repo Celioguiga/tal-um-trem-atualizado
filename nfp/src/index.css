@@ -8,4 +8,24 @@
   --color-rng-sol: #0066ff;
   --color-rng-la: #8b5e00;
   --color-rng-si: #9b5fc0;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+
+/* ── Selection ── */
+::selection { background: var(--primaryGlow, #0066ff40); color: #fff; }
+
+/* ── Focus ── */
+*:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+/* ── Body ── */
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
 }

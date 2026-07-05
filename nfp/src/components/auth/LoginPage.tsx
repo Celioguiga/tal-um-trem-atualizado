@@ -2,20 +2,26 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { PrivacyBanner } from "./PrivacyBanner";
+import { Logo } from "../brand/Logo";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  if (isAuthenticated) {
+    navigate("/app", { replace: true });
+    return null;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     try {
       await login(email, password);
-      navigate("/");
+      navigate("/app");
     } catch {
       setError("Email ou senha inválidos.");
     }
@@ -25,9 +31,8 @@ export function LoginPage() {
     <PrivacyBanner>
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
         <div className="w-full max-w-md space-y-8">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-white">Note Form Pro</h1>
-            <p className="text-zinc-400 mt-2">Synemusic — Metodologia RNG</p>
+          <div className="text-center flex flex-col items-center">
+            <Logo size="lg" showTagline />
           </div>
 
           <form onSubmit={handleSubmit} className="bg-zinc-900 rounded-xl p-8 space-y-6 border border-zinc-800">
