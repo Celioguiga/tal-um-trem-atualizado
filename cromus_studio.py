@@ -65,6 +65,126 @@ _LY_PITCH = {0:"r", 1:"c'", 2:"d'", 3:"e'", 4:"f'", 5:"g'", 6:"a'", 7:"b'"}
 _TUPLET_FRAC = {3:'3/2', 5:'5/4', 6:'6/4', 7:'7/4', 9:'9/8'}
 _UNIDADE_TUPLET = {3:8, 5:16, 6:16, 7:16, 9:32}
 
+_INSTRUMENTOS = {
+    "Violino I":    {"clef": "treble", "midi": 40, "abrev": "Vl.I"},
+    "Violino II":   {"clef": "treble", "midi": 41, "abrev": "Vl.II"},
+    "Viola":        {"clef": "alto",   "midi": 42, "abrev": "Vla."},
+    "Violoncelo":   {"clef": "bass",   "midi": 43, "abrev": "Vc."},
+    "Cello":        {"clef": "bass",   "midi": 43, "abrev": "Vc."},
+    "Contrabaixo":  {"clef": "bass",   "midi": 44, "abrev": "Cb."},
+    "Flauta":       {"clef": "treble", "midi": 73, "abrev": "Fl."},
+    "Flautim":      {"clef": "treble", "midi": 72, "abrev": "Picc."},
+    "Oboé":         {"clef": "treble", "midi": 68, "abrev": "Ob."},
+    "Clarinete":    {"clef": "treble", "midi": 71, "abrev": "Cl."},
+    "Fagote":       {"clef": "bass",   "midi": 70, "abrev": "Fg."},
+    "Soprano":      {"clef": "treble", "midi": 54, "abrev": "S."},
+    "Contralto":    {"clef": "treble", "midi": 55, "abrev": "C."},
+    "Tenor":        {"clef": "treble", "midi": 56, "abrev": "T."},
+    "Baixo":        {"clef": "bass",   "midi": 57, "abrev": "B."},
+    "Trompa":       {"clef": "bass",   "midi": 60, "abrev": "Cor"},
+    "Trompete":     {"clef": "treble", "midi": 56, "abrev": "Tpt."},
+    "Trombone":     {"clef": "bass",   "midi": 57, "abrev": "Tbn."},
+    "Tuba":         {"clef": "bass",   "midi": 58, "abrev": "Tba."},
+    "Harpa":        {"clef": "bass",   "midi": 46, "abrev": "Hp."},
+    "Piano":        {"clef": "bass",   "midi": 1,  "abrev": "Pno."},
+    "Bateria":      {"clef": "percussion", "midi": 0, "abrev": "Batt."},
+    "Voz":          {"clef": "treble", "midi": 54, "abrev": "Voz"},
+}
+
+_CLEF_LILY = {"treble":"treble", "alto":"alto", "bass":"bass", "percussion":"percussion"}
+
+
+def _is_orquestral(sintaxe):
+    return bool(re.search(r'^---', sintaxe, re.MULTILINE))
+
+
+def _parse_orquestral(sintaxe):
+    blocos = re.split(r'\n(?=---)', sintaxe.strip())
+    vozes = []
+    for bloco in blocos:
+        linhas = bloco.strip().split('\n')
+        cabecalho = linhas[0].lstrip('-').strip()
+        inst_name = cabecalho.split(':')[0].strip() if ':' in cabecalho else cabecalho
+        corpo = '\n'.join(l for l in linhas[1:] if l.strip())
+        vozes.append({"instrumento": inst_name, "sintaxe": corpo})
+    return vozes
+
+
+_INSTR_LOOKUP = {k.lower(): v for k, v in _INSTRUMENTOS.items()}
+
+
+def _resolver_instrumento(nome):
+    key = nome.strip().lower()
+    if key in _INSTR_LOOKUP:
+        return _INSTR_LOOKUP[key]
+    for alias, inst_name in [("vl", "Violino I"), ("vln", "Violino I"),
+                             ("vla", "Viola"), ("vc", "Violoncelo"),
+                             ("cb", "Contrabaixo"), ("fl", "Flauta"),
+                             ("cl", "Clarinete"), ("ob", "Oboé"),
+                             ("fg", "Fagote"), ("tp", "Trompete"),
+                             ("cor", "Trompa"), ("tbn", "Trombone"),
+                             ("tba", "Tuba"), ("pno", "Piano")]:
+        if nome.strip().lower().startswith(alias):
+            return _INSTRUMENTOS[inst_name]
+    return {"clef": "treble", "midi": 40, "abrev": nome.strip()}
+
+
+def _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=80, tonalidade="c \\major"):
+    vozes = _parse_orquestral(sintaxe)
+    if not vozes:
+        return _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
+    partes = []
+    for voz in vozes:
+        inst = _resolver_instrumento(voz["instrumento"])
+        ly_raw = _sintaxe_para_ly_raw(voz["sintaxe"], compasso, andamento=andamento, tonalidade=tonalidade)
+        clef = _CLEF_LILY.get(inst["clef"], "treble")
+        midi_prog = inst["midi"]
+        staff = (
+            f'    \\new Staff \\with {{\n'
+            f'      instrumentName = "{inst["abrev"]}"\n'
+            f'      midiInstrument = #{midi_prog}\n'
+            f'    }}\n'
+            f'    {{\n'
+            f'      \\clef {clef}\n'
+            f'      {ly_raw.strip()}\n'
+            f'    }}\n'
+        )
+        partes.append(staff)
+    corpo = '\n'.join(partes)
+    return (
+        '  \\new StaffGroup <<\n'
+        f'{corpo}\n'
+        '  >>\n'
+    )
+
+
+def _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major"):
+    """Gera bloco \\score com \\midi para orquestral ou monofônico."""
+    orquestral = _is_orquestral(sintaxe)
+    if orquestral:
+        raw = _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
+    else:
+        raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
+        modoe = "REAL" if modo == "STAFFLESS" else modo
+        raw = (
+            f'    \\new Staff \\with {{ midiInstrument = #40 }}\n'
+            f'    {{\n'
+            f'      \\clef treble\n'
+            f'      {raw.strip()}\n'
+            f'    }}\n'
+        )
+    ly = (
+        f'\\version "2.26.0"\n'
+        f'\\header {{ title = "{titulo}" }}\n'
+        f'\\score {{\n'
+        f'{raw}'
+        f'  \\layout {{ }}\n'
+        f'  \\midi {{ }}\n'
+        f'}}\n'
+    )
+    return ly
+
+
 def _finger_to_ly(finger_str):
     if not finger_str: return ''
     parts = [p.strip() for p in finger_str.split(',')]
@@ -302,6 +422,11 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
 
 def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major"):
     import tempfile, os
+    # Rota orquestral: gera LilyPond completo diretamente
+    if _is_orquestral(sintaxe):
+        ly = _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=andamento, tonalidade=tonalidade)
+        return ly
+    # Rota monofônica: usa pipeline legado
     fn, nome = _localizar_parser()
     notas_raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
     cantiga = {
@@ -486,9 +611,10 @@ def compilar_tab(sintaxe, titulo, compasso, compositor="Synemusic"):
 def compilar(sintaxe, modo, titulo, compasso):
     WORK_DIR.mkdir(exist_ok=True)
     for f in WORK_DIR.glob("preview*"): f.unlink(missing_ok=True)
+    orquestral_ = _is_orquestral(sintaxe)
     conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso)
     (WORK_DIR / "preview.ly").write_text(conteudo_ly, encoding="utf-8")
-    if HEADER_FILE.exists():
+    if HEADER_FILE.exists() and not orquestral_:
         shutil.copy(HEADER_FILE, WORK_DIR / HEADER_FILE.name)
     # Passo 1: PDF + PNG para exibição visual
     proc = subprocess.run(
@@ -530,6 +656,61 @@ def compilar(sintaxe, modo, titulo, compasso):
     return {"ok": True, "pages": imgs, "positions": posicoes,
             "log": log.strip(), "ly": conteudo_ly,
             "pdf": (WORK_DIR / "preview.pdf").exists()}
+
+
+# ─────────────────────────── ÁUDIO ORQUESTRAL ───────────────────────────────
+# Gera WAV via LilyPond → MIDI → FluidSynth com SoundFont real
+
+_SOUNDFONT_PATHS = [
+    os.path.expanduser("~/Library/Audio/Sounds/MuseScore_General.sf3"),
+    os.path.expanduser("~/Library/Audio/Sounds/FluidR3_GM.sf2"),
+    "/opt/homebrew/share/soundfonts/MuseScore_General.sf3",
+    "/usr/share/sounds/sf2/FluidR3_GM.sf2",
+]
+
+def _localizar_soundfont():
+    for p in _SOUNDFONT_PATHS:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _compilar_audio(sintaxe, titulo, compasso, andamento=80, tonalidade="c \\major"):
+    WORK_DIR.mkdir(exist_ok=True)
+    for f in WORK_DIR.glob("midi_*"): f.unlink(missing_ok=True)
+    for f in WORK_DIR.glob("audio_*"): f.unlink(missing_ok=True)
+    # Gera .ly com \midi (aproveita a função orquestral se multi-voz)
+    ly = _sintaxe_com_midi(sintaxe, "REAL", titulo, compasso, andamento=andamento, tonalidade=tonalidade)
+    ly_path = WORK_DIR / "midi_preview.ly"
+    ly_path.write_text(ly, encoding="utf-8")
+    # Compila .ly → MIDI
+    proc = subprocess.run(
+        [LILYPOND, "-dno-point-and-click", "--formats=midi", "-o", "midi_preview", "midi_preview.ly"],
+        capture_output=True, text=True, cwd=str(WORK_DIR), timeout=120)
+    log = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    midis = sorted(WORK_DIR.glob("midi_preview*.midi")) or sorted(WORK_DIR.glob("midi_preview*.mid"))
+    if not midis and proc.returncode != 0:
+        return {"ok": False, "erro": "MIDI não gerado", "log": log.strip()}
+    midi_path = midis[0]
+    # MIDI → WAV via FluidSynth
+    wav_path = WORK_DIR / "audio_preview.wav"
+    sf_path = _localizar_soundfont()
+    if not sf_path:
+        # Fallback: MIDI bruto sem SoundFont
+        wav_data = base64.b64encode(midi_path.read_bytes()).decode()
+        return {"ok": True, "midi": wav_data, "wav": None,
+                "erro": "SoundFont não encontrado. Baixe um .sf2 em ~/Library/Audio/Sounds/",
+                "log": log.strip()}
+    fs_cmd = ["fluidsynth", "-ni", "-F", str(wav_path), "-g", "0.8", sf_path,
+              "-T", "wav", str(midi_path)]
+    subprocess.run(fs_cmd, capture_output=True, text=True, timeout=180)
+    if not wav_path.exists():
+        return {"ok": False, "erro": "FluidSynth não gerou WAV", "log": log.strip()}
+    wav_data = base64.b64encode(wav_path.read_bytes()).decode()
+    # Limpeza
+    ly_path.unlink(missing_ok=True)
+    midi_path.unlink(missing_ok=True)
+    return {"ok": True, "wav": wav_data, "midi": None, "log": log.strip()}
 
 
 # ─────────────────────────── PARSER MUSICXML ────────────────────────────────
@@ -2675,12 +2856,48 @@ class Handler(BaseHTTPRequestHandler):
             }))
             self._send(200,json.dumps({"ok":True,"sintaxe":normalizado}),
                 "application/json; charset=utf-8")
+        elif p=="/render/audio":
+            d=self._json()
+            try:
+                res=_compilar_audio(d.get("sintaxe",""),
+                    d.get("titulo","Sem título"),d.get("compasso","2/4"),
+                    andamento=d.get("andamento",80),
+                    tonalidade=d.get("tonalidade","c \\major"))
+            except Exception as e:
+                res={"ok":False,"erro":str(e)}
+            self._send(200,json.dumps(res),"application/json; charset=utf-8")
         elif p=="/export/midi":
-            self._send(200,json.dumps({"ok":False,"erro":"MIDI export não implementado no backend."}),
-                "application/json; charset=utf-8")
+            d=self._json()
+            try:
+                res=_compilar_audio(d.get("sintaxe",""),
+                    d.get("titulo","Sem título"),d.get("compasso","2/4"),
+                    andamento=d.get("andamento",80),
+                    tonalidade=d.get("tonalidade","c \\major"))
+                if res.get("midi"):
+                    self._send(200,json.dumps({"ok":True,"midi":res["midi"]}),
+                        "application/json; charset=utf-8")
+                else:
+                    self._send(200,json.dumps({"ok":False,"erro":"MIDI não gerado"}),
+                        "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200,json.dumps({"ok":False,"erro":str(e)}),
+                    "application/json; charset=utf-8")
         elif p=="/export/wav":
-            self._send(200,json.dumps({"ok":False,"erro":"WAV export não implementado no backend."}),
-                "application/json; charset=utf-8")
+            d=self._json()
+            try:
+                res=_compilar_audio(d.get("sintaxe",""),
+                    d.get("titulo","Sem título"),d.get("compasso","2/4"),
+                    andamento=d.get("andamento",80),
+                    tonalidade=d.get("tonalidade","c \\major"))
+                if res.get("wav"):
+                    self._send(200,json.dumps({"ok":True,"wav":res["wav"]}),
+                        "application/json; charset=utf-8")
+                else:
+                    self._send(200,json.dumps({"ok":False,"erro":res.get("erro","WAV não gerado")}),
+                        "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200,json.dumps({"ok":False,"erro":str(e)}),
+                    "application/json; charset=utf-8")
         else:
             self._send(404,b"not found","text/plain")
 

@@ -44,6 +44,24 @@ type RenderResult = {
   ly?: string;
 };
 
+function parseVoices(s: string): string[] {
+  if (!s.includes("---")) return [];
+  const voices: string[] = [];
+  for (const line of s.split("\n")) {
+    const m = line.match(/^---\s*(.+?)(?::|$)/);
+    if (m) voices.push(m[1].trim());
+  }
+  return voices;
+}
+
+const VOICE_EMOJI: Record<string, string> = {
+  "Violino I": "🎻", "Violino II": "🎻", "Viola": "🎻", "Violoncelo": "🎻", "Cello": "🎻",
+  "Flauta": "🪈", "Flautim": "🪈", "Oboé": "🪈", "Clarinete": "🪈", "Fagote": "🪈",
+  "Trompa": "📯", "Trompete": "🎺", "Trombone": "🎺", "Tuba": "🎺",
+  "Piano": "🎹", "Harpa": "🪕", "Bateria": "🥁",
+  "Soprano": "🎤", "Contralto": "🎤", "Tenor": "🎤", "Baixo": "🎤",
+};
+
 const INSERTS = [
   { label: "notas", text: " 1 2 3 4 5 6 7" },
   { label: "pausa", text: " -" },
@@ -252,6 +270,38 @@ export function NfpPage() {
   const pageRangesRef = useRef<number[]>([]);
   const [showRecorder, setShowRecorder] = useState(false);
   const [showDictation, setShowDictation] = useState(false);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioWavUrl, setAudioWavUrl] = useState<string | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+
+  const voices = parseVoices(sintaxe);
+  const orquestral = voices.length > 0;
+
+  const handleRealAudio = useCallback(async () => {
+    if (audioWavUrl) {
+      audioElRef.current?.play();
+      return;
+    }
+    setAudioLoading(true);
+    try {
+      const res = await fetch("/api/nfp/render/audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sintaxe, titulo, compasso }),
+      });
+      const data = await res.json();
+      if (data.ok && data.wav) {
+        const url = `data:audio/wav;base64,${data.wav}`;
+        setAudioWavUrl(url);
+        const audio = new Audio(url);
+        audioElRef.current = audio;
+        audio.play();
+      } else {
+        alert(data.erro || "Áudio indisponível");
+      }
+    } catch { alert("Erro ao gerar áudio"); }
+    setAudioLoading(false);
+  }, [sintaxe, titulo, compasso, audioWavUrl]);
 
   const notes = parseTimeline(sintaxe);
 
@@ -529,7 +579,28 @@ export function NfpPage() {
               color: showDictation ? "#fff" : vars["--accent"],
             }}
           >🎙</button>
+          <button onClick={handleRealAudio} disabled={audioLoading}
+            className="px-2 py-1 font-bold rounded transition-all text-base"
+            style={{
+              background: audioWavUrl ? "#00B050" : vars["--surface2"],
+              color: audioWavUrl ? "#fff" : "#00B050",
+            }}
+            title={orquestral ? "Áudio orquestral (FluidSynth)" : "Áudio real (FluidSynth)"}
+          >{audioLoading ? "…" : "🔊"}</button>
         </div>
+
+        {orquestral && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px]"
+            style={{ background: "#0066FF10", color: "#0066FF", border: "1px solid #0066FF20" }}
+          >
+            {voices.map((v, i) => (
+              <span key={i} className="flex items-center gap-0.5">
+                {i > 0 && <span style={{ color: "#0066FF40" }}>+</span>}
+                {VOICE_EMOJI[v] || "🎵"} {v}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="w-px h-6" style={{ background: vars["--border"] }} />
 
