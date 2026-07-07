@@ -608,11 +608,11 @@ def compilar_tab(sintaxe, titulo, compasso, compositor="Synemusic"):
     return {"ok": True, "pages": imgs, "log": log.strip(), "ly": conteudo_ly, "pdf": pdf_data}
 
 # ─────────────────────────── COMPILAÇÃO ─────────────────────────────────────
-def compilar(sintaxe, modo, titulo, compasso):
+def compilar(sintaxe, modo, titulo, compasso, tonalidade="c \\major"):
     WORK_DIR.mkdir(exist_ok=True)
     for f in WORK_DIR.glob("preview*"): f.unlink(missing_ok=True)
     orquestral_ = _is_orquestral(sintaxe)
-    conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso)
+    conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso, tonalidade=tonalidade)
     (WORK_DIR / "preview.ly").write_text(conteudo_ly, encoding="utf-8")
     if HEADER_FILE.exists() and not orquestral_:
         shutil.copy(HEADER_FILE, WORK_DIR / HEADER_FILE.name)
@@ -2799,13 +2799,15 @@ class Handler(BaseHTTPRequestHandler):
         if p=="/render":
             d=self._json()
             modo=d.get("modo","REAL")
+            ton=d.get("tonalidade","c \\major")
             try:
                 if modo=="TAB":
                     res=compilar_tab(d.get("sintaxe",""),
                                      d.get("titulo","Sem título"),d.get("compasso","2/4"))
                 else:
                     res=compilar(d.get("sintaxe",""),modo,
-                                  d.get("titulo","Sem título"),d.get("compasso","2/4"))
+                                  d.get("titulo","Sem título"),d.get("compasso","2/4"),
+                                  tonalidade=ton)
             except Exception as e:
                 res={"ok":False,"log":str(e)}
             self._send(200,json.dumps(res),"application/json; charset=utf-8")

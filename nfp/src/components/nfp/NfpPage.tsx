@@ -44,6 +44,39 @@ type RenderResult = {
   ly?: string;
 };
 
+const TONALIDADES = [
+  { label: "Dó maior", value: "c \\major" },
+  { label: "Sol maior (1♯)", value: "g \\major" },
+  { label: "Ré maior (2♯)", value: "d \\major" },
+  { label: "Lá maior (3♯)", value: "a \\major" },
+  { label: "Mi maior (4♯)", value: "e \\major" },
+  { label: "Si maior (5♯)", value: "b \\major" },
+  { label: "Fá♯ maior (6♯)", value: "fis \\major" },
+  { label: "Dó♯ maior (7♯)", value: "cis \\major" },
+  { label: "Fá maior (1♭)", value: "f \\major" },
+  { label: "Si♭ maior (2♭)", value: "bes \\major" },
+  { label: "Mi♭ maior (3♭)", value: "ees \\major" },
+  { label: "Lá♭ maior (4♭)", value: "aes \\major" },
+  { label: "Ré♭ maior (5♭)", value: "des \\major" },
+  { label: "Sol♭ maior (6♭)", value: "ges \\major" },
+  { label: "Dó♭ maior (7♭)", value: "ces \\major" },
+  { label: "Lá menor", value: "a \\minor" },
+  { label: "Mi menor (1♯)", value: "e \\minor" },
+  { label: "Si menor (2♯)", value: "b \\minor" },
+  { label: "Fá♯ menor (3♯)", value: "fis \\minor" },
+  { label: "Dó♯ menor (4♯)", value: "cis \\minor" },
+  { label: "Sol♯ menor (5♯)", value: "gis \\minor" },
+  { label: "Ré♯ menor (6♯)", value: "dis \\minor" },
+  { label: "Lá♯ menor (7♯)", value: "ais \\minor" },
+  { label: "Ré menor (1♭)", value: "d \\minor" },
+  { label: "Sol menor (2♭)", value: "g \\minor" },
+  { label: "Dó menor (3♭)", value: "c \\minor" },
+  { label: "Fá menor (4♭)", value: "f \\minor" },
+  { label: "Si♭ menor (5♭)", value: "bes \\minor" },
+  { label: "Mi♭ menor (6♭)", value: "ees \\minor" },
+  { label: "Lá♭ menor (7♭)", value: "aes \\minor" },
+];
+
 function parseVoices(s: string): string[] {
   if (!s.includes("---")) return [];
   const voices: string[] = [];
@@ -268,6 +301,7 @@ export function NfpPage() {
   const [titulo, setTitulo] = useState("Sem título");
   const [compositor, setCompositor] = useState("");
   const [compasso, setCompasso] = useState("4/4");
+  const [tonalidade, setTonalidade] = useState("c \\major");
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [activePage, setActivePage] = useState(0);
@@ -304,7 +338,7 @@ export function NfpPage() {
       const res = await fetch("/api/nfp/render/audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, titulo, compasso }),
+        body: JSON.stringify({ sintaxe, titulo, compasso, tonalidade }),
       });
       const data = await res.json();
       if (data.ok && data.wav) {
@@ -433,12 +467,12 @@ export function NfpPage() {
       const res = await fetch("/api/nfp/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, modo, titulo, compasso }),
+        body: JSON.stringify({ sintaxe, modo, titulo, compasso, tonalidade }),
       });
       setResult(await res.json());
     } catch { setResult({ ok: false, log: "Erro de conexão." }); }
     setRendering(false);
-  }, [sintaxe, modo, titulo, compasso]);
+  }, [sintaxe, modo, titulo, compasso, tonalidade]);
 
   const insertAtCursor = (text: string) => {
     const el = textareaRef.current;
@@ -491,7 +525,7 @@ export function NfpPage() {
       const res = await fetch("/api/nfp/export/midi", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, titulo, compositor, compasso }),
+        body: JSON.stringify({ sintaxe, titulo, compositor, compasso, tonalidade }),
       });
       if (!res.ok) throw new Error("MIDI export failed");
       const blob = await res.blob();
@@ -502,14 +536,14 @@ export function NfpPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch { alert("MIDI export not available yet"); }
-  }, [sintaxe, titulo, compositor, compasso]);
+  }, [sintaxe, titulo, compositor, compasso, tonalidade]);
 
   const handleExportWav = useCallback(async () => {
     try {
       const res = await fetch("/api/nfp/export/wav", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, titulo, compositor, compasso }),
+        body: JSON.stringify({ sintaxe, titulo, compositor, compasso, tonalidade }),
       });
       if (!res.ok) throw new Error("WAV export failed");
       const blob = await res.blob();
@@ -520,7 +554,7 @@ export function NfpPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch { alert("WAV export not available yet"); }
-  }, [sintaxe, titulo, compositor, compasso]);
+  }, [sintaxe, titulo, compositor, compasso, tonalidade]);
 
   const handleImport = useCallback(() => {
     const input = document.createElement("input");
@@ -685,6 +719,15 @@ export function NfpPage() {
             <option value="14/8">14/8</option>
             <option value="15/8">15/8</option>
           </optgroup>
+        </select>
+
+        <select value={tonalidade} onChange={(e) => setTonalidade(e.target.value)}
+          className="px-2 py-1 rounded border text-sm w-24"
+          style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
+        >
+          {TONALIDADES.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
         </select>
 
         <div className="w-px h-6" style={{ background: vars["--border"] }} />
