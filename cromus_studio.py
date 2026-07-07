@@ -30,6 +30,9 @@ import base64, json, os, re, shutil, subprocess, sys, tempfile, threading, webbr
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rng_common
+
 PORT        = 4242
 BASE_DIR    = Path(__file__).resolve().parent
 HEADER_FILE = BASE_DIR / "cromus_header.ily"
@@ -62,8 +65,26 @@ _LY_PITCH = {0:"r", 1:"c'", 2:"d'", 3:"e'", 4:"f'", 5:"g'", 6:"a'", 7:"b'"}
 _TUPLET_FRAC = {3:'3/2', 5:'5/4', 6:'6/4', 7:'7/4', 9:'9/8'}
 _UNIDADE_TUPLET = {3:8, 5:16, 6:16, 7:16, 9:32}
 
+def _finger_to_ly(finger_str):
+    if not finger_str: return ''
+    parts = [p.strip() for p in finger_str.split(',')]
+    out = ''
+    for p in parts:
+        if p in ('p','i','m','a'):
+            out += '_' + p
+        elif p in ('1','2','3','4'):
+            out += '-' + p
+        elif p in ('P','I','M','A'):
+            out += '_' + p.lower()
+    return out
+
 def _parse_nota(tok):
     import re as _re
+    finger = ''
+    fm = _re.search(r'\{([^}]*)\}', tok)
+    if fm:
+        finger = _finger_to_ly(fm.group(1))
+        tok = tok.replace(fm.group(0), '')
     ast = len(tok) - len(tok.rstrip('*'))
     parcelas = ast if ast > 0 else 1
     corpo = tok.rstrip('*')
@@ -72,11 +93,12 @@ def _parse_nota(tok):
         oitava -= 1; corpo = corpo[1:]
     while corpo.endswith("'"):
         oitava += 1; corpo = corpo[:-1]
+    corpo = corpo.lstrip('+')
     if corpo in ('-','0'):
-        return ('r', parcelas)
+        return ('r', parcelas, finger)
     m = _re.match(r"^([0-7])([#b]?)$", corpo)
     if not m:
-        return (None, parcelas)
+        return (None, parcelas, finger)
     grau = int(m.group(1)); acc = m.group(2)
     pitch = _LY_PITCH[grau]
     if oitava > 0:
@@ -88,7 +110,7 @@ def _parse_nota(tok):
         pitch = pitch[0] + 'is' + pitch[1:]
     elif acc == 'b':
         pitch = pitch[0] + 'es' + pitch[1:]
-    return (pitch, parcelas)
+    return (pitch, parcelas, finger)
 
 def _eh_tuplet_total(total):
     return total not in (1,2,4,8,16,32)
@@ -104,11 +126,31 @@ def _dur_de_unidades(unidades, unidade_base):
             return POW[base] + '.'
     return str(unidade_base)
 
+def _finger_to_ly(finger_str):
+    if not finger_str: return ''
+    parts = [p.strip() for p in finger_str.split(',')]
+    out = ''
+    for p in parts:
+        if p in ('p','i','m','a'):
+            out += '_' + p
+        elif p in ('1','2','3','4'):
+            out += '-' + p
+        elif p in ('P','I','M','A'):
+            out += '_' + p.lower()
+    return out
+
 def _converter_tempo(grupo):
     import re as _re
     g = grupo.strip()
     if not g:
         return ''
+
+    # ---- Preprocess + (ligadura/tie) into @TIE@ markers ----
+    # "5+6" → "5 @TIE@ 6", "5 + 6" → "5 @TIE@ 6", "+5 6" → "@TIE@ 5 6"
+    g = _re.sub(r'(\S+?)\s*\+', r'\1 @TIE@ ', g)
+    g = _re.sub(r'\+\s*(\S+)', r' @TIE@ \1', g)
+    g = _re.sub(r'@TIE@\s+@TIE@', '@TIE@', g)
+
     mc = _re.match(r'^\(\((.+)\)\)$', g)
     mt = _re.match(r'^\((.+)\)$', g)
     alvo = mc or mt
@@ -117,21 +159,49 @@ def _converter_tempo(grupo):
         n = len(notas)
         frac = _TUPLET_FRAC.get(n, str(n)+'/'+str(n-1))
         corpo = []
+        tie_next = False
         for tk in notas:
-            p,_ = _parse_nota(tk)
-            if p: corpo.append(p + '8')
+            is_tie = tk == '@TIE@'
+            if is_tie:
+                tie_next = True
+                continue
+            p, _, finger = _parse_nota(tk.replace('@TIE@',''))
+            if p:
+                nly = p + '8' + finger
+                if tie_next and corpo:
+                    corpo[-1] += '~'
+                elif tie_next:
+                    nly += '~'
+                tie_next = False
+                corpo.append(nly)
         return '\\tuplet ' + frac + ' { ' + ' '.join(corpo) + ' }'
-    if '*' in g:
-        tokens = _re.findall(r"[^*\s]+\*+|[^*\s]+", g.replace(' ',''))
-        notas = []
-        for t in tokens:
-            if '*' not in t:
-                notas.append((t,1))
+
+    # Strip @TIE@ markers and record which notes are tied
+    raw = g.split()
+    tie_idx = set()
+    clean_raw = []
+    tie_pending = False
+    for tok in raw:
+        if tok == '@TIE@':
+            if clean_raw:
+                tie_idx.add(len(clean_raw) - 1)
             else:
-                base = t.rstrip('*'); ast = len(t)-len(base)
-                notas.append((base,ast))
-    else:
-        notas = [(t,1) for t in g.split()]
+                tie_pending = True
+        else:
+            clean_raw.append(tok)
+            if tie_pending:
+                tie_idx.add(len(clean_raw) - 1)
+                tie_pending = False
+    clean_g = ' '.join(clean_raw)
+
+    tokens = _re.findall(r"[0-7]\{[^}]*\}[''#b]*\**|[0-7]'*\*+|-\*+|[0-7]'*|-", clean_g.replace(' ',''))
+    notas = []
+    for t in tokens:
+        if '*' in t:
+            base = t.rstrip('*'); ast = len(t)-len(base)
+            notas.append((base, ast))
+        else:
+            notas.append((t, 1))
     total = sum(p for _,p in notas)
     if total == 0:
         return ''
@@ -139,33 +209,79 @@ def _converter_tempo(grupo):
     POW2 = {4.0:'1',2.0:'2',1.0:'4',0.5:'8',0.25:'16',0.125:'32',
             3.0:'2.',1.5:'4.',0.75:'8.',0.375:'16.'}
     corpo = []
-    for base, parcelas in notas:
-        pitch,_ = _parse_nota(base)
+    for idx, (base, parcelas) in enumerate(notas):
+        pitch, _, finger = _parse_nota(base)
         if not pitch:
             continue
         if tuplet:
             unidade_base = _UNIDADE_TUPLET.get(total,16)
-            corpo.append(pitch + _dur_de_unidades(parcelas, unidade_base))
+            nly = pitch + _dur_de_unidades(parcelas, unidade_base) + finger
         else:
             frac = (parcelas/total)*1.0
-            corpo.append(pitch + POW2.get(frac,'16'))
+            nly = pitch + POW2.get(frac,'16') + finger
+        if idx in tie_idx:
+            nly += '~'
+        corpo.append(nly)
     inner = ' '.join(corpo)
     if tuplet:
         frac = _TUPLET_FRAC.get(total, str(total)+'/'+str(total-1))
         return '\\tuplet ' + frac + ' { ' + inner + ' }'
     return inner
 
-def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4):
-    num, denom = compasso.split('/')
+def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80, tonalidade="c \\major"):
+    s = sintaxe
+    s = s.replace('`', "'")
+    # Substitui marcadores estruturais por placeholders isolados por virgulas
+    s = re.sub(r'\(\s*CASA\s*1\s*\)', ',@volta_1@,', s)
+    s = re.sub(r'\(\s*CASA\s*2\s*\)', ',@volta_2@,', s)
+    s = s.replace('||:', ' ,@start_rep@, ')
+    s = s.replace(':||', ' ,@end_rep@, ')
+    s = s.replace('D.C.', ' ,@da_capo@, ')
+    s = s.replace('D.S.', ' ,@dal_segno@, ')
+    s = s.replace('𝄌', ' ,@to_coda@, ')
+    s = s.replace('𝄋', ' ,@segno@, ')
+    s = s.replace('FIM', ' ,@fim@, ')
+    # Agora converte | para , (separador de tempo)
+    s = s.replace('|', ',')
+    for junk in ['CASA1', 'CASA2', '[1', '[2']:
+        s = s.replace(junk, ',')
+    s = re.sub(r',,+', ',', s)
+    s = s.strip(',').strip()
+    beat_struct = ""
+    comp_base = compasso
+    if '(' in compasso:
+        comp_base = compasso.split('(')[0].strip()
+        bs = compasso.split('(')[1].rstrip(')').strip()
+        beat_struct = ' ' + bs
+    num, denom = comp_base.split('/')
     tempos_por_compasso = int(num)
-    grupos = sintaxe.split(',')
+    grupos = s.split(',')
     partes = []
     cont_tempo = 0
     cont_compasso = 0
+    # Tabela de conversao placeholder → LilyPond
+    LILY_MARKS = {
+        '@start_rep@': "\\set Score.repeatCommands = #'(start-repeat)",
+        '@end_rep@':   "\\set Score.repeatCommands = #'((volta #f) end-repeat)",
+        '@volta_1@':   "\\set Score.repeatCommands = #'((volta \"1\"))",
+        '@volta_2@':   "\\set Score.repeatCommands = #'((volta \"2\"))",
+        '@da_capo@':   "\\mark \\markup { \\musicglyph #\"scripts.dacapo\" \\bold { D.C. al Fine } }",
+        '@dal_segno@': "\\mark \\markup { \\musicglyph #\"scripts.segno\" }",
+        '@to_coda@':   "\\mark \\markup { \\musicglyph #\"scripts.coda\" }",
+        '@segno@':     "\\mark \\markup { \\musicglyph #\"scripts.segno\" }",
+        '@fim@':       '\\bar "|." \\mark \\markup { \\bold { Fim } }',
+    }
     for grupo in grupos:
-        if grupo.strip() == '':
+        g = grupo.strip()
+        if not g:
             continue
-        ly = _converter_tempo(grupo)
+        # Se for placeholder estrutural
+        if g in LILY_MARKS:
+            if g == '@fim@':
+                partes.append("\\set Score.repeatCommands = #'((volta #f))")
+            partes.append(LILY_MARKS[g])
+            continue
+        ly = _converter_tempo(g)
         partes.append(ly)
         cont_tempo += 1
         if cont_tempo >= tempos_por_compasso:
@@ -175,15 +291,22 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4):
             if cont_compasso % compassos_por_linha == 0:
                 partes.append('\\break')
     corpo = ' '.join(partes)
-    return '    {\n      \\clef treble\n      ' + corpo + '\n    }\n'
+    time_cmd = f'  \\time {comp_base}{beat_struct}\n'
+    return (
+        time_cmd +
+        f'  \\tempo 4 = {andamento}\n'
+        f'  \\key {tonalidade}\n'
+        '\n'
+        '  ' + corpo + '\n'
+    )
 
-def gerar_arquivo_ly(sintaxe, modo, titulo, compasso):
+def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major"):
     import tempfile, os
     fn, nome = _localizar_parser()
-    notas_raw = _sintaxe_para_ly_raw(sintaxe, compasso)
+    notas_raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
     cantiga = {
         "titulo": titulo, "compositor": "Synemusic", "compasso": compasso,
-        "tonalidade": "c \\major", "andamento": 80, "compassos_por_linha": 4,
+        "tonalidade": tonalidade, "andamento": andamento, "compassos_por_linha": 4,
         "notas_ly_raw": notas_raw,
     }
     with tempfile.NamedTemporaryFile(suffix=".ly", delete=False) as tmp:
@@ -198,11 +321,151 @@ def gerar_arquivo_ly(sintaxe, modo, titulo, compasso):
 # ────────────────────────── fim do ADAPTADOR ────────────────────────────────
 
 
-# ─────────────────────────── COMPILAÇÃO ─────────────────────────────────────
-def compilar(sintaxe, modo, titulo, compasso):
+# ─────────────────────────── COMPILAÇÃO TAB ──────────────────────────────────
+# Gera LilyPond com Staff (RNFG) + TabStaff (algarismos romanos, ritmo, dedilhado)
+
+_TAB_ROMAN_MAP = "'(\"I\" \"II\" \"III\" \"IV\" \"V\" \"VI\" \"VII\" \"VIII\" \"IX\" \"X\" \"XI\" \"XII\" \"XIII\" \"XIV\" \"XV\" \"XVI\" \"XVII\" \"XVIII\" \"XIX\" \"XX\" \"XXI\" \"XXII\")"
+
+_TAB_HEADER_LY = r'''
+#(define (roman-fret-number grob)
+   (let* ((fret (ly:grob-property grob 'fret #f))
+          (romans %s))
+     (if (and (integer? fret) (>= fret 1) (<= fret (length romans)))
+         (grob-interpret-markup grob (markup (list-ref romans (1- fret))))
+         (if (integer? fret)
+             (grob-interpret-markup grob (markup (number->string fret)))
+             (grob-interpret-markup grob (markup "?"))))))
+''' % _TAB_ROMAN_MAP
+
+def _extrair_dedilhado(sintaxe):
+    """Extrai anotações de dedilhado {1-4} (mão esquerda) e {p,i,m,a} (direita)
+    da sintaxe original. Retorna lista de strings LilyPond na ordem das notas."""
+    import re as _re
+    # Remove marcadores estruturais
+    s = sintaxe
+    for j in ['||:', ':||', '||', 'FIM', 'D.C.', 'D.S.', '𝄌', '𝄋', 'CASA1', 'CASA2']:
+        s = s.replace(j, ' ')
+    s = _re.sub(r'\([^)]*\)', ' ', s)
+    # Extrai tokens que são notas (dígitos com possíveis oitavas/acidentes)
+    tokens = _re.findall(r"[0-7]['#b]*\{[^}]*\}|[0-7]['#b]*", s)
+    dedos = []
+    for tok in tokens:
+        m = _re.search(r'\{([^}]*)\}', tok)
+        if m:
+            txt = m.group(1).strip()
+            # txt pode ser "2" (esquerda), "p" (direita), ou "2,i" (ambos)
+            partes = txt.replace(',', ' ').split()
+            esq = None; dir = None
+            for p in partes:
+                p = p.strip().lower()
+                if p in ('p','i','m','a','c','x'):
+                    dir = p
+                elif p in ('1','2','3','4','5'):
+                    esq = p
+            # Gera LilyPond articulation
+            arts = []
+            if esq: arts.append('-' + esq)
+            if dir: arts.append('_' + dir)
+            dedos.append(''.join(arts) if arts else '')
+        else:
+            dedos.append('')
+    return dedos
+
+def _aplicar_dedilhado_ly(notas_raw, dedos):
+    """Aplica dedilhado às notas num bloco LilyPond.
+    Substitui cada nota c'4 por c'4-2 (dedo esquerdo) etc."""
+    import re as _re
+    if not dedos: return notas_raw
+    tokens = _re.findall(r"r\d*\.?\s*|[a-g]['',]*\d*\.?\s*", notas_raw)
+    idx = 0
+    saida = []
+    for tok in tokens:
+        tok_s = tok.strip()
+        if not tok_s: continue
+        if tok_s.startswith('r'):
+            saida.append(tok)
+            continue
+        # É uma nota
+        dedo = dedos[idx] if idx < len(dedos) else ''
+        saida.append(tok_s + dedo + ' ')
+        if dedo: idx += 1
+        else: idx += 1
+    return ''.join(saida)
+
+def _gerar_tab_ly(sintaxe, titulo, compasso, andamento=80, tonalidade="c \\major", compositor="Synemusic"):
+    raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
+    # notas_raw from _sintaxe_para_ly_raw already includes \time, \tempo, \key headers;
+    # the template below also adds them, so strip them from raw to avoid duplication.
+    linhas = raw.split('\n')
+    linhas = [l for l in linhas if not l.strip().startswith(('\\time','\\tempo','\\key'))]
+    notas_raw = '\n'.join(linhas)
+    return (
+        '\\version "2.26.0"\n\n'
+        '\\include "cromus_header.ily"\n\n'
+        + _TAB_HEADER_LY + '\n'
+        '\\header {\n'
+        f'  title    = "{titulo}"\n'
+        f'  composer = "{compositor}"\n'
+        '  tagline  = ##f\n'
+        '}\n\n'
+        '#(set-global-staff-size 34)\n'
+        '\n\\paper {\n'
+        '  #(set-paper-size "a4")\n'
+        '  ragged-bottom = ##f\n'
+        '  ragged-last   = ##f\n'
+        '  indent        = 0.8\\cm\n'
+        '  short-indent  = 0\\cm\n'
+        '  top-margin    = 10\\mm\n'
+        '  bottom-margin = 14\\mm\n'
+        '  left-margin   = 12\\mm\n'
+        '  right-margin  = 12\\mm\n'
+        '  print-page-number = ##t\n'
+        '  print-first-page-number = ##t\n'
+        '  system-system-spacing.padding = 6\\mm\n'
+        '  system-system-spacing.minimum-distance = 5\\mm\n'
+        '  page-limit-inter-system-space = ##t\n'
+        '  page-limit-inter-system-space-factor = 1.3\n'
+        '}\n\n'
+        '\\score {\n'
+        '  <<\n'
+        '    \\new Staff \\with {\n'
+        '      \\consists #(cromus-engraver-factory "REAL")\n'
+        '    } {\n'
+        f'      \\clef treble\n'
+        f'      \\key {tonalidade}\n'
+        f'      \\time {compasso}\n'
+        f'      \\tempo 4 = {andamento}\n\n'
+        f'      {notas_raw}\n'
+        '    }\n'
+        '    \\new TabStaff \\with {\n'
+        '      \\tabFullNotation\n'
+        '      \\override TabNoteHead.stencil = #roman-fret-number\n'
+        '    } {\n'
+        '      \\clef moderntab\n'
+        f'      \\key {tonalidade}\n'
+        f'      \\time {compasso}\n'
+        f'      \\tempo 4 = {andamento}\n\n'
+        '      \\set TabStaff.stringTunings = #guitar-tuning\n'
+        f'      {notas_raw}\n'
+        '    }\n'
+        '  >>\n'
+        '  \\layout {\n'
+        '    \\context {\n'
+        '      \\Score\n'
+        '      \\override SpacingSpanner.uniform-stretching = ##t\n'
+        '    }\n'
+        '    \\context {\n'
+        '      \\TabStaff\n'
+        '      \\override TabNoteHead.font-size = -2\n'
+        '    }\n'
+        '  }\n'
+        '}\n'
+    )
+
+def compilar_tab(sintaxe, titulo, compasso, compositor="Synemusic"):
     WORK_DIR.mkdir(exist_ok=True)
     for f in WORK_DIR.glob("preview*"): f.unlink(missing_ok=True)
-    conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso)
+    conteudo_ly = _gerar_tab_ly(sintaxe, titulo, compasso, compositor=compositor)
     (WORK_DIR / "preview.ly").write_text(conteudo_ly, encoding="utf-8")
     if HEADER_FILE.exists():
         shutil.copy(HEADER_FILE, WORK_DIR / HEADER_FILE.name)
@@ -215,7 +478,57 @@ def compilar(sintaxe, modo, titulo, compasso):
     if proc.returncode != 0 and not paginas:
         return {"ok": False, "log": log.strip(), "ly": conteudo_ly}
     imgs = [base64.b64encode(p.read_bytes()).decode() for p in paginas]
-    return {"ok": True, "pages": imgs, "log": log.strip(), "ly": conteudo_ly,
+    pdf_path = WORK_DIR / "preview.pdf"
+    pdf_data = base64.b64encode(pdf_path.read_bytes()).decode() if pdf_path.exists() else ""
+    return {"ok": True, "pages": imgs, "log": log.strip(), "ly": conteudo_ly, "pdf": pdf_data}
+
+# ─────────────────────────── COMPILAÇÃO ─────────────────────────────────────
+def compilar(sintaxe, modo, titulo, compasso):
+    WORK_DIR.mkdir(exist_ok=True)
+    for f in WORK_DIR.glob("preview*"): f.unlink(missing_ok=True)
+    conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso)
+    (WORK_DIR / "preview.ly").write_text(conteudo_ly, encoding="utf-8")
+    if HEADER_FILE.exists():
+        shutil.copy(HEADER_FILE, WORK_DIR / HEADER_FILE.name)
+    # Passo 1: PDF + PNG para exibição visual
+    proc = subprocess.run(
+        [LILYPOND, "-dno-point-and-click", "--formats=pdf,png",
+         "-dresolution=170", "-o", "preview", "preview.ly"],
+        capture_output=True, text=True, cwd=str(WORK_DIR), timeout=120)
+    log = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    paginas = sorted(WORK_DIR.glob("preview*.png"))
+    if proc.returncode != 0 and not paginas:
+        return {"ok": False, "log": log.strip(), "ly": conteudo_ly}
+    imgs = [base64.b64encode(p.read_bytes()).decode() for p in paginas]
+
+    # Passo 2: SVG apenas para extrair posições das notas (highlight nota-a-nota)
+    posicoes = []
+    subprocess.run(
+        [LILYPOND, "-dno-point-and-click", "-dbackend=svg",
+         "-o", "preview", "preview.ly"],
+        capture_output=True, text=True, cwd=str(WORK_DIR), timeout=60)
+    svgs = sorted(WORK_DIR.glob("preview*.svg"))
+    _RE_NOTA = re.compile(
+        r'<g color="rgba\([^)]+%\)">\s*'
+        r'<g transform="translate\(([\d\.\-]+),\s*([\d\.\-]+)\)">\s*'
+        r'(?:<circle[^>]*/>|<path[^>]*/>|<rect[^>]*/>)'
+    )
+    for svg_path in svgs:
+        svg_content = svg_path.read_text(encoding="utf-8")
+        notas = _RE_NOTA.findall(svg_content)
+        vb = re.search(
+            r'viewBox="([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)"',
+            svg_content
+        )
+        posicoes.append({
+            "notas": [{"x": float(x), "y": float(y)} for x, y in notas],
+            "w": float(vb.group(3)) if vb else 63,
+            "h": float(vb.group(4)) if vb else 89,
+        })
+        svg_path.unlink(missing_ok=True)  # limpa SVG após extrair
+
+    return {"ok": True, "pages": imgs, "positions": posicoes,
+            "log": log.strip(), "ly": conteudo_ly,
             "pdf": (WORK_DIR / "preview.pdf").exists()}
 
 
@@ -280,6 +593,7 @@ HTML = r"""<!DOCTYPE html>
 <title>Note Form Pro · Synemusic</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.1.4/build/midi-writer.js"></script>
+<script src="https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.js"></script>
 <style>
 /* ── tokens e tema claro/escuro ── */
 :root{
@@ -417,6 +731,30 @@ main{flex:1;display:grid;grid-template-columns:46px minmax(300px,40%) 1fr;min-he
   resize:none;font:14px/1.9 var(--mono);letter-spacing:.03em;min-height:0;
   transition:border-color .15s;
 }
+/* barrinha de marcadores do compasso atual */
+.comp-bar{
+  display:flex;align-items:center;gap:4px;
+  padding:2px 11px 0;font-size:11px;color:var(--dim);
+  flex-shrink:0;overflow-x:auto;
+}
+.comp-bar .cnum{font:bold 12px var(--mono);color:var(--ink);margin-right:4px;white-space:nowrap}
+.comp-bar .cmrk{
+  background:var(--line);border:none;border-radius:4px;padding:2px 7px;
+  font:10px var(--mono);color:var(--dim);cursor:pointer;white-space:nowrap;
+  transition:all .15s;
+}
+.comp-bar .cmrk:hover{background:#3a3f4e;color:var(--ink)}
+.comp-bar .cmrk.on{background:#0a3a2a;color:var(--ok);box-shadow:0 0 0 1px var(--ok)}
+/* grade de propriedades no painel */
+.prop-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.pbtn{
+  background:var(--line);border:none;border-radius:5px;padding:5px 8px;
+  font:10px var(--mono);color:var(--dim);cursor:pointer;text-align:center;
+  transition:all .12s;
+}
+.pbtn:hover{background:#3a3f50;color:var(--ink)}
+.pbtn.on{background:#0a2a18;color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
+.pbtn.dcon{background:#3a1a18;color:#f08060;box-shadow:inset 0 0 0 1px #f08060}
 #sintaxe:focus{outline:none;border-color:#4a5264}
 .ebar{display:flex;align-items:center;gap:6px;padding:0 11px 9px;flex-wrap:wrap}
 .btn{
@@ -463,6 +801,7 @@ main{flex:1;display:grid;grid-template-columns:46px minmax(300px,40%) 1fr;min-he
 }
 .nbtn:hover{transform:scale(1.1)}
 .nbtn.sel{outline:2px solid #fff;outline-offset:1px}
+.nbtn.playing{transform:scale(1.2);box-shadow:0 0 20px 8px rgba(255,255,255,.45);z-index:2}
 .n1{background:var(--do)} .n2{background:var(--re);color:#1a1a1a}
 .n3{background:var(--mi);color:#1a1a1a} .n4{background:var(--fa)}
 .n5{background:var(--sol)} .n6{background:var(--la)} .n7{background:var(--si)}
@@ -649,6 +988,8 @@ pre.logbox{
     <button class="rbtn" data-tip="Áudio / Exportar" onclick="sw('audio')">🔊</button>
     <button class="rbtn" data-tip="Importar arquivo" onclick="sw('import')">📂</button>
     <button class="rbtn" data-tip="LilyPond"         onclick="sw('ly')">📄</button>
+    <button class="rbtn" data-tip="Real Tablatura"   onclick="sw('tab')">🎸</button>
+    <button class="rbtn" data-tip="Harmonia Real"    onclick="sw('harm')">🎵</button>
     <button class="rbtn" data-tip="Log de compilação" onclick="sw('log')">📋</button>
   </div>
 
@@ -665,6 +1006,8 @@ pre.logbox{
         <select id="modo">
           <option value="REAL">REAL (cores)</option>
           <option value="FORMA">FORMA (preto)</option>
+          <option value="STAFFLESS">Sem Pentagrama</option>
+          <option value="TAB">Tab + Partitura 🎸</option>
         </select>
       </div>
     </div>
@@ -674,6 +1017,18 @@ pre.logbox{
       <span id="infoCompassos">compassos: —</span>
       <span id="infoTokens">tokens: 0</span>
       <span class="badge" id="infoMetrica">—</span>
+    </div>
+    <div class="comp-bar" id="compBar">
+      <span class="cnum" id="compNumLabel">Comp. 1</span>
+      <button class="cmrk" data-cmrk="repeat-start" onclick="toggleCompMark('repeat-start')" title="Início de repetição">|:</button>
+      <button class="cmrk" data-cmrk="repeat-end"   onclick="toggleCompMark('repeat-end')"   title="Fim de repetição">:|</button>
+      <button class="cmrk" data-cmrk="casa1"        onclick="toggleCompMark('casa1')"        title="Casa 1">C₁</button>
+      <button class="cmrk" data-cmrk="casa2"        onclick="toggleCompMark('casa2')"        title="Casa 2">C₂</button>
+      <button class="cmrk" data-cmrk="dc"           onclick="toggleCompMark('dc')"           title="Da Capo">D.C.</button>
+      <button class="cmrk" data-cmrk="ds"           onclick="toggleCompMark('ds')"           title="Dal Segno">D.S.</button>
+      <button class="cmrk" data-cmrk="coda"         onclick="toggleCompMark('coda')"         title="Coda (𝄌)">𝄌</button>
+      <button class="cmrk" data-cmrk="segno"        onclick="toggleCompMark('segno')"        title="Segno (𝄋)">𝄋</button>
+      <button class="cmrk" data-cmrk="fine"         onclick="toggleCompMark('fine')"         title="Fine / Fim">Fine</button>
     </div>
 
     <!-- busca inline -->
@@ -772,6 +1127,21 @@ pre.logbox{
           </div>
         </div>
 
+        <div class="sp-sec">
+          <h3>Propriedades do Compasso <span id="propCompNum" style="color:var(--ok)">1</span></h3>
+          <div class="prop-grid">
+            <button class="pbtn" data-prop="repeat-start" onclick="toggleProp('repeat-start')">|: Repetir</button>
+            <button class="pbtn" data-prop="repeat-end"   onclick="toggleProp('repeat-end')">:| Fim Rep.</button>
+            <button class="pbtn" data-prop="casa1"        onclick="toggleProp('casa1')">Casa 1</button>
+            <button class="pbtn" data-prop="casa2"        onclick="toggleProp('casa2')">Casa 2</button>
+            <button class="pbtn dcon" data-prop="dc"      onclick="toggleProp('dc')">D.C.</button>
+            <button class="pbtn dcon" data-prop="ds"      onclick="toggleProp('ds')">D.S.</button>
+            <button class="pbtn dcon" data-prop="coda"    onclick="toggleProp('coda')">𝄌</button>
+            <button class="pbtn dcon" data-prop="segno"   onclick="toggleProp('segno')">𝄋</button>
+            <button class="pbtn dcon" data-prop="fine"    onclick="toggleProp('fine')">Fine ✣</button>
+          </div>
+        </div>
+
       </div>
     </div>
   </section>
@@ -783,6 +1153,8 @@ pre.logbox{
       <span class="tab"     data-t="audio"  onclick="sw('audio')">Áudio</span>
       <span class="tab"     data-t="import" onclick="sw('import')">Importar</span>
       <span class="tab"     data-t="ly"     onclick="sw('ly')">LilyPond</span>
+      <span class="tab"     data-t="tab"    onclick="sw('tab')">Tablatura</span>
+      <span class="tab"     data-t="harm"   onclick="sw('harm')">Harmonia</span>
       <span class="tab"     data-t="log"    onclick="sw('log')">Log</span>
     </div>
     <div class="tabcontent">
@@ -803,10 +1175,14 @@ pre.logbox{
           </div>
           <div class="inst-w">Instrumento
             <select id="instSel">
-              <option value="am" selected>Piano (AMSynth)</option>
-              <option value="fm">Órgão (FMSynth)</option>
-              <option value="saw">Sintetizador</option>
-              <option value="tri">Violão (Triangle)</option>
+              <option value="piano" selected>Piano</option>
+              <option value="violao">Violão</option>
+              <option value="flauta">Flauta</option>
+              <option value="ukulele">Ukulele</option>
+              <option value="lira">Lira</option>
+              <option value="salterio">Saltério</option>
+              <option value="orgao">Órgão</option>
+              <option value="synth">Sintetizador</option>
             </select>
           </div>
           <div class="metro-row" style="display:flex;align-items:center;gap:10px;margin-top:10px">
@@ -868,6 +1244,63 @@ pre.logbox{
       <!-- LilyPond -->
       <div class="pane" id="p-ly">
         <pre id="lyCode">— compile para ver o código LilyPond —</pre>
+      </div>
+
+      <!-- Tablatura -->
+      <div class="pane" id="p-tab">
+        <div style="padding:10px 14px;display:flex;flex-direction:column;gap:8px;height:100%">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-weight:600;font-size:13px">Sintaxe:</span>
+            <textarea id="tabSintaxe" rows="1" spellcheck="false"
+              style="flex:1;font:13px var(--mono);padding:5px 8px;background:var(--bg);
+              border:1px solid var(--line);border-radius:6px;color:var(--ink);resize:vertical;min-height:30px"
+              placeholder="Cole ou edite a Sintaxe Cromus"
+              oninput="tabAutoParse()"></textarea>
+            <label style="font-size:12px">Tom:
+              <select id="tabTonalidade" style="font-size:12px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px">
+                <option>C</option><option>G</option><option>D</option><option>A</option><option>E</option><option>B</option>
+                <option>F</option><option>Bb</option><option>Eb</option><option>Ab</option><option>Db</option><option>Gb</option>
+                <option>Am</option><option>Em</option><option>Bm</option><option>F#m</option><option>C#m</option>
+                <option>Dm</option><option>Gm</option><option>Cm</option><option>Fm</option>
+              </select>
+            </label>
+            <button class="btn" style="font-size:12px;padding:4px 10px" onclick="syncTabSintaxe()">⇅ Sinc</button>
+            <button class="btn" style="font-size:12px;padding:4px 10px" onclick="gerarTab()">🎸 Gerar</button>
+          </div>
+          <div id="tabOutput" style="flex:1;overflow:auto;min-height:150px">
+            <div style="color:var(--dim);font-size:13px">
+              A tablatura aparece automaticamente ao abrir ou clicar em Gerar.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Harmonia Real -->
+      <div class="pane" id="p-harm">
+        <div style="padding:14px;display:flex;flex-direction:column;gap:12px;height:100%">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span style="font-weight:600">Cifra:</span>
+            <input id="harmCifra" spellcheck="false" placeholder="Ex: G7, Am, Dm7, C"
+              style="width:140px;font:16px var(--mono);padding:6px;background:var(--bg);
+              border:1px solid var(--line);border-radius:6px;color:var(--ink)">
+            <label>Tonalidade:
+              <select id="harmTonalidade" style="background:var(--bg);color:var(--ink);border:1px solid var(--line)">
+                <option>C</option><option>G</option><option>D</option><option>A</option><option>E</option><option>B</option>
+                <option>F</option><option>Bb</option><option>Eb</option><option>Ab</option><option>Db</option><option>Gb</option>
+              </select>
+            </label>
+            <label>Modo:
+              <select id="harmModo" style="background:var(--bg);color:var(--ink);border:1px solid var(--line)">
+                <option value="maior">Maior</option>
+                <option value="menor">Menor</option>
+              </select>
+            </label>
+            <button class="btn" onclick="gerarHarmonia()">Analisar</button>
+          </div>
+          <div id="harmOutput" style="flex:1;overflow:auto;min-height:200px">
+            <div style="color:var(--dim);font-size:13px">Digite uma cifra e clique em Analisar.</div>
+          </div>
+        </div>
       </div>
 
       <!-- Log -->
@@ -976,6 +1409,11 @@ function redoAction(){
 function sw(id){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.t===id));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='p-'+id));
+  if(id==='tab'){
+    const ta=$('tabSintaxe');
+    if(!ta.value.trim()) ta.value=$('sintaxe').value;
+    if(ta.value.trim()) gerarTab();
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1018,7 +1456,108 @@ function atualizarInfo(){
   } else {
     badge.className='badge'; badge.textContent=`${beatsAtuais.toFixed(2)}/${beatsEsperados} tempos`;
   }
+  atualizarComp();
 }
+
+// ══════════════════════════════════════════════════════════
+//  MEDIDAS — DETECÇÃO E MARCADORES DE COMPASSO
+// ══════════════════════════════════════════════════════════
+const COMP_MARKERS = {
+  'repeat-start': { txt:'||:', side:'before' },
+  'repeat-end':   { txt:':||', side:'after'  },
+  'casa1':        { txt:'(CASA1)', side:'before' },
+  'casa2':        { txt:'(CASA2)', side:'before' },
+  'dc':           { txt:'D.C.',    side:'after'  },
+  'ds':           { txt:'D.S.',    side:'after'  },
+  'coda':         { txt:'𝄌',      side:'after'  },
+  'segno':        { txt:'𝄋',      side:'after'  },
+  'fine':         { txt:'FIM',     side:'after'  },
+};
+
+function getCompInfo(val, cursorPos) {
+  // acha o compasso sob o cursor baseado nas barras |
+  // retorna { idx (0-based), inicio, fim, total }
+  const ant = val.slice(0, Math.min(cursorPos||0, val.length));
+  const todos = val.match(/\|/g);
+  const antes = (ant.match(/\|/g)||[]).length;
+  // procura posicao da enesima barra
+  let pos = 0, inicios = [], fins = [];
+  for(let i=0; i<val.length; i++){
+    if(val[i] === '|'){
+      fins.push(i+1);  // fim do compasso anterior (depois da barra)
+      if(i+1 < val.length) inicios.push(i+1);
+    }
+  }
+  inicios.unshift(0);  // comp 1 comeca no inicio
+  fins.push(val.length);
+  const idx = Math.min(antes, inicios.length-1);
+  return {
+    idx,
+    inicio: inicios[idx]||0,
+    fim: fins[idx]||val.length,
+    total: todos ? todos.length+1 : 1,
+    conteudo: val.slice(inicios[idx]||0, fins[idx]||val.length)
+  };
+}
+
+function atualizarComp(){
+  const info = getCompInfo(ta.value, ta.selectionStart);
+  const num = info.idx + 1;
+  $('compNumLabel').textContent = `Comp. ${num}`;
+  $('propCompNum').textContent = num;
+  // atualiza estado dos botoes — escaneia conteudo do comp
+  const c = info.conteudo;
+  document.querySelectorAll('.cmrk').forEach(btn => {
+    const k = btn.dataset.cmrk;
+    const m = COMP_MARKERS[k];
+    const on = m && c.includes(m.txt);
+    btn.classList.toggle('on', on);
+  });
+  document.querySelectorAll('.pbtn').forEach(btn => {
+    const k = btn.dataset.prop;
+    const m = COMP_MARKERS[k];
+    const on = m && c.includes(m.txt);
+    btn.classList.toggle('on', on);
+  });
+}
+
+function toggleCompMark(k){
+  const m = COMP_MARKERS[k];
+  if(!m) return;
+  const info = getCompInfo(ta.value, ta.selectionStart);
+  const val = ta.value;
+  const c = info.conteudo;
+  const jaTem = c.includes(m.txt);
+  const selIni = ta.selectionStart, selFim = ta.selectionEnd;
+
+  let novo;
+  if(jaTem){
+    // remove
+    novo = val.slice(0, info.inicio) + c.replace(m.txt, '') + val.slice(info.fim);
+  } else {
+    // insere
+    const ins = m.txt + (m.side==='after' ? ' ' : '');
+    if(m.side === 'before'){
+      const pos = info.inicio;
+      novo = val.slice(0, pos) + ins + val.slice(pos);
+    } else {
+      const pos = info.fim;
+      novo = val.slice(0, pos) + (m.side==='after'? ' ' + ins : ins) + val.slice(pos);
+    }
+  }
+  ta.value = novo;
+  pushHistory(novo);
+  atualizarInfo();
+  schedRender();
+  // restaura cursor
+  const desl = jaTem ? -m.txt.length : m.txt.length + (m.side==='after'?1:0);
+  const novoPos = Math.max(0, Math.min(novo.length, selIni + (jaTem ? 0 : 0)));
+  ta.selectionStart = ta.selectionEnd = novoPos;
+  ta.focus();
+  atualizarComp();
+}
+
+function toggleProp(k){ toggleCompMark(k); }
 
 // ══════════════════════════════════════════════════════════
 //  BUSCA INLINE (I — novo v2.0.1)
@@ -1270,6 +1809,8 @@ const ta=$('sintaxe');
 ta.addEventListener('input',()=>{
   pushHistory(ta.value); atualizarInfo(); schedRender();
 });
+ta.addEventListener('click', atualizarComp);
+ta.addEventListener('keyup', atualizarComp);
 $('titulo').addEventListener('input',schedRender);
 $('compasso').addEventListener('input',schedRender);
 $('modo').addEventListener('change',render);
@@ -1288,11 +1829,36 @@ async function render(){
     const d=await r.json();
     const pane=$('p-score');
     if(d.ok){
-      pane.innerHTML=d.pages.map(p=>`<div class="page"><img src="data:image/png;base64,${p}"></div>`).join('');
+      pane.innerHTML=d.pages.map((p,i)=>`<div class="page" data-pg="${i}"><img src="data:image/png;base64,${p}"></div>`).join('');
       $('lyCode').textContent=d.ly||'—';
       setStatus('ok','ok');
       pushLog(`Compilado com sucesso — ${d.pages.length} pág.`, true);
       parseSintaxeAudio(s);
+      // Prepara canvas overlay com posições das notas
+      _notePositions=[];
+      if(d.positions){
+        let flat=[], idx=0;
+        d.positions.forEach((pg, pgi)=>{
+          const vbW=pg.w, vbH=pg.h;
+          const pngW=Math.round(210/25.4*170), pngH=Math.round(297/25.4*170);
+          const sx=pngW/vbW, sy=pngH/vbH;
+          const pageDiv=pane.querySelector(`[data-pg="${pgi}"]`);
+          if(!pageDiv) return;
+          let cv=pageDiv.querySelector('.note-canvas');
+          if(!cv){
+            cv=document.createElement('canvas');
+            cv.className='note-canvas';
+            cv.width=pngW; cv.height=pngH;
+            cv.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+            pageDiv.style.position='relative';
+            pageDiv.appendChild(cv);
+          }
+          pg.notas.forEach(n=>{
+            flat.push({page:pgi, x:n.x*sx, y:n.y*sy});
+          });
+        });
+        _notePositions=flat;
+      }
     }else{
       pane.innerHTML=`<pre class="logbox">${esc(d.log||d.erro||'erro desconhecido')}</pre>`;
       setStatus('erro','err');
@@ -1319,21 +1885,41 @@ const DUR_TONE={w:'1n',h:'2n',q:'4n',e:'8n',s:'16n',t:'32n'};
 let _events=[], _totalTime=0, _synth=null, _playing=false;
 let _tempos=[];        // {time, compasso, tempoNoCompasso, charIni, charFim}
 let _metroOn=false, _metroSynth=null, _cursorRAF=null;
+let _notePositions=[]; // [{page, x, y}] — espelha _events[], posições no canvas
+let _sampler=null, _samplerName='';
+
+const _SF_MAP = {
+  piano:'acoustic_grand_piano', violao:'acoustic_guitar_nylon',
+  flauta:'flute', ukulele:'acoustic_guitar_steel',
+  lira:'orchestral_harp', salterio:'harpsichord', orgao:'church_organ',
+};
+let _currentNoteIdx=0;
+
+function preprocessSintaxe(s){
+  s = s.replace(/`/g, "'");
+  s = s.replace(/\(\s*CASA\s*\d+\s*\)/g, '');
+  for(const junk of ['||:', ':||', '||', 'FIM', 'D.C.', 'D.S.', '𝄌', '𝄋', 'CASA1', 'CASA2', '[1', '[2']){
+    s = s.replaceAll(junk, '');
+  }
+  s = s.replace(/\|/g, ',');
+  s = s.replace(/,+/g, ',');
+  s = s.replace(/^[,\s]+|[,\s]+$/g, '');
+  return s;
+}
 
 function parseSintaxeAudio(sintaxe){
-  // Mesmo modelo do conversor: virgula=tempo, asteriscos=parcelas
+  sintaxe = preprocessSintaxe(sintaxe);
   _events = [];
   const bpm = parseFloat($('bpmVal').value) || 80;
-  const beat = 60 / bpm;            // segundos por seminima (1 tempo)
-  const GRAU_OCT = {1:0,2:2,3:4,4:5,5:7,6:9,7:11};  // semitons a partir de C
-  const BASE_MIDI = 60;             // C4
+  const beat = 60 / bpm;
+  const GRAU_OCT = {1:0,2:2,3:4,4:5,5:7,6:9,7:11};
+  const BASE_MIDI = 60;
 
   function notaParaMidi(base){
-    // base ja sem asteriscos. trata oitavas ' e acidentes # b
     let oitava = 0;
     while(base.startsWith("'")){ oitava--; base = base.slice(1); }
     while(base.endsWith("'")){ oitava++; base = base.slice(0,-1); }
-    if(base === '-' || base === '0') return null;  // pausa
+    if(base === '-' || base === '0') return null;
     const m = base.match(/^([0-7])([#b]?)$/);
     if(!m) return null;
     const grau = +m[1], acc = m[2];
@@ -1351,25 +1937,24 @@ function parseSintaxeAudio(sintaxe){
   let time = 0;
   _tempos = [];
   const numCompasso = parseInt(($('compasso').value||'4/4').split('/')[0]) || 4;
-  const grupos = sintaxe.split(',');  // cada grupo = 1 tempo
+  const grupos = sintaxe.split(',');
   let idxTempo = 0, charPos = 0;
   for(let gi=0; gi<grupos.length; gi++){
     let grupoRaw = grupos[gi];
     const charIni = charPos;
-    charPos += grupoRaw.length + 1; // +1 da virgula
+    charPos += grupoRaw.length + 1;
     let grupo = grupoRaw.trim();
     if(!grupo) continue;
-    // registra marco do tempo
     _tempos.push({
-      time: time,
+      time,
       compasso: Math.floor(idxTempo / numCompasso) + 1,
       tempoNoCompasso: (idxTempo % numCompasso) + 1,
-      charIni: charIni,
+      charIni,
       charFim: charIni + grupoRaw.length
     });
     idxTempo++;
 
-    // quialtera explicita (a b c) ou ((a b c))
+    // Tuplet explicito (a b c) ou ((a b c))
     let mtuplet = grupo.match(/^\(+(.+?)\)+$/);
     let notas;
     let totalParcelas;
@@ -1377,24 +1962,20 @@ function parseSintaxeAudio(sintaxe){
       const itens = mtuplet[1].split(/\s+/).filter(Boolean);
       notas = itens.map(t => ({base:t.replace(/\*+$/,''), parc:1}));
       totalParcelas = notas.length;
-    } else if(grupo.includes('*')){
-      const tokens = grupo.replace(/\s+/g,'').match(/[^*\s]+\*+|[^*\s]+/g) || [];
-      notas = tokens.map(t=>{
-        const base = t.replace(/\*+$/,'');
-        const ast = t.length - base.length;
-        return {base, parc: ast>0?ast:1};
-      });
-      totalParcelas = notas.reduce((a,n)=>a+n.parc,0);
     } else {
-      const itens = grupo.split(/\s+/).filter(Boolean);
-      notas = itens.map(t=>({base:t, parc:1}));
-      totalParcelas = notas.length || 1;
+      // Tokenizador unificado: mescla a logica com/sem asteriscos
+      const tokens = grupo.replace(/\s+/g,'').match(/[0-7]'*\*+|-\*+|[0-7]'*|-/g) || [];
+      if(!tokens.length) continue;
+      notas = tokens.map(tok => {
+        const base = tok.replace(/\*+$/, '');
+        const ast = tok.length - base.length;
+        return { base, parc: 1 + ast };
+      });
+      totalParcelas = notas.reduce((a,n) => a + n.parc, 0);
     }
-
     if(totalParcelas === 0) totalParcelas = 1;
-    // cada parcela dura (1 tempo / total) segundos
-    const durParcela = beat / totalParcelas;
 
+    const durParcela = beat / totalParcelas;
     for(const n of notas){
       const midi = notaParaMidi(n.base);
       const durSeg = durParcela * n.parc;
@@ -1407,16 +1988,82 @@ function parseSintaxeAudio(sintaxe){
   _totalTime = time;
 }
 
-function buildSynth(){
-  if(_synth){try{_synth.dispose();}catch(e){}}
+function buildSynthFallback(){
+  if(_synth){try{_synth.dispose();}catch(e){}_synth=null;}
   const t=$('instSel').value;
   const O={
-    am:[Tone.PolySynth,Tone.AMSynth,{harmonicity:2,oscillator:{type:'triangle'},envelope:{attack:.005,decay:.3,sustain:.2,release:.8}}],
-    fm:[Tone.PolySynth,Tone.FMSynth,{harmonicity:3,envelope:{attack:.01,decay:.1,sustain:.4,release:1}}],
-    saw:[Tone.PolySynth,Tone.Synth,{oscillator:{type:'sawtooth'},envelope:{attack:.01,decay:.1,sustain:.5,release:.4}}],
-    tri:[Tone.PolySynth,Tone.Synth,{oscillator:{type:'triangle'},envelope:{attack:.005,decay:.4,sustain:.3,release:1.2}}],
-  }[t]||[Tone.PolySynth,Tone.Synth,{}];
+    piano:[Tone.PolySynth,Tone.AMSynth,{harmonicity:2,oscillator:{type:'triangle'},envelope:{attack:.005,decay:.3,sustain:.2,release:.8}}],
+    orgao:[Tone.PolySynth,Tone.FMSynth,{harmonicity:3,envelope:{attack:.01,decay:.1,sustain:.4,release:1}}],
+    synth:[Tone.PolySynth,Tone.Synth,{oscillator:{type:'sawtooth'},envelope:{attack:.01,decay:.1,sustain:.5,release:.4}}],
+    violao:[Tone.PolySynth,Tone.Synth,{oscillator:{type:'triangle'},envelope:{attack:.003,decay:.3,sustain:0,release:1.0}}],
+    flauta:[Tone.PolySynth,Tone.Synth,{oscillator:{type:'sine'},envelope:{attack:.1,decay:.1,sustain:.8,release:.3}}],
+    ukulele:[Tone.PolySynth,Tone.FMSynth,{harmonicity:1.5,modulationIndex:2,oscillator:{type:'triangle'},envelope:{attack:.001,decay:.2,sustain:0,release:.6}}],
+    lira:[Tone.PolySynth,Tone.FMSynth,{harmonicity:2.5,modulationIndex:1,oscillator:{type:'sine'},envelope:{attack:.003,decay:.3,sustain:0,release:1.2}}],
+    salterio:[Tone.PolySynth,Tone.FMSynth,{harmonicity:4,modulationIndex:3,oscillator:{type:'sine'},envelope:{attack:.001,decay:.4,sustain:0,release:.8}}],
+  }[t]||[Tone.PolySynth,Tone.AMSynth,{}];
   _synth=new O[0](O[1],O[2]).toDestination();
+}
+
+async function loadSampler(name){
+  const sfName=_SF_MAP[name];
+  if(!sfName){_sampler=null; _samplerName=''; buildSynthFallback(); return;}
+  if(_sampler && _samplerName===name) return;
+  _sampler=null; _samplerName='';
+  if(_synth){try{_synth.dispose();}catch(e){}_synth=null;}
+  try{
+    await Tone.start();
+    const ctx=Tone.context.rawContext;
+    _sampler=await SoundFont.instrument(ctx, sfName);
+    _samplerName=name;
+  }catch(e){
+    console.warn('SoundFont falhou, usando síntese:', e);
+    buildSynthFallback();
+  }
+}
+
+// Carrega piano ao iniciar
+setTimeout(()=>loadSampler('piano'), 1000);
+
+const _NOTE_GRAU={C:1,D:2,E:3,F:4,G:5,A:6,B:7};
+function highlightNote(noteName, on){
+  const grau=_NOTE_GRAU[noteName[0]];
+  if(!grau) return;
+  const btn=document.querySelector(`.nbtn[data-n="${grau}"]`);
+  if(btn) btn.classList.toggle('playing', on);
+}
+function clearNoteHighlights(){
+  document.querySelectorAll('.nbtn.playing').forEach(b=>b.classList.remove('playing'));
+}
+
+function drawNoteGlow(idx){
+  if(idx<0||idx>=_notePositions.length) return;
+  const pos=_notePositions[idx];
+  const pageDiv=document.querySelector(`.page[data-pg="${pos.page}"]`);
+  if(!pageDiv) return;
+  const cv=pageDiv.querySelector('.note-canvas');
+  if(!cv) return;
+  const ctx=cv.getContext('2d');
+  // Glow dourado: gradiente radial
+  const g=ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, 40);
+  g.addColorStop(0, 'rgba(255,215,0,1)');
+  g.addColorStop(0.25, 'rgba(255,215,0,0.7)');
+  g.addColorStop(0.5, 'rgba(255,215,0,0.2)');
+  g.addColorStop(1, 'rgba(255,215,0,0)');
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, 40, 0, Math.PI*2);
+  ctx.fill();
+  // Anel externo
+  ctx.strokeStyle='rgba(255,215,0,1)';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, 12, 0, Math.PI*2);
+  ctx.stroke();
+}
+function clearNoteGlow(){
+  document.querySelectorAll('.note-canvas').forEach(cv=>{
+    cv.getContext('2d').clearRect(0,0,cv.width,cv.height);
+  });
 }
 
 async function audioPlay(){
@@ -1427,14 +2074,23 @@ async function audioPlay(){
   }
   const s=ta.value.trim(); if(s) parseSintaxeAudio(s);
   if(!_events.length){$('alog').textContent='Sem notas. Compile primeiro.';return;}
-  buildSynth();
+  await loadSampler($('instSel').value);
   Tone.Transport.stop();Tone.Transport.cancel();
   Tone.Transport.bpm.value=parseFloat($('bpmVal').value)||80;
   _events.forEach(ev=>{
-    if(ev.note) Tone.Transport.schedule(t=>_synth.triggerAttackRelease(ev.note,ev.dur,t),ev.time);
+    if(ev.note){
+      Tone.Transport.schedule(t=>{
+        if(_sampler) _sampler.play(ev.note, t, {duration:ev.dur, gain:0.6});
+        else if(_synth) _synth.triggerAttackRelease(ev.note, ev.dur, t);
+      }, ev.time);
+      Tone.Transport.schedule(t=>highlightNote(ev.note,true),ev.time);
+      Tone.Transport.schedule(t=>highlightNote(ev.note,false),ev.time+ev.dur);
+    }
   });
   Tone.Transport.schedule(()=>{
     _playing=false;$('playBtn').textContent='▶';
+    clearNoteHighlights();
+    clearNoteGlow();
     $('alog').textContent='Reprodução concluída.';
     $('progFill').style.width='100%';
     setTimeout(()=>$('progFill').style.width='0%',800);
@@ -1452,7 +2108,9 @@ async function audioPlay(){
       }, tp.time);
     });
   }
-  // cursor visual + indicador + texto destacado
+  // cursor visual + indicador + texto destacado + glow nota-a-nota
+  _currentNoteIdx=0;
+  let lastNoteIdx=-1;
   const pi=setInterval(()=>{
     if(!_playing){clearInterval(pi);return;}
     const seg = Tone.Transport.seconds;
@@ -1478,6 +2136,15 @@ async function audioPlay(){
         ta.setSelectionRange(atual.charIni, atual.charFim);
       }catch(e){}
     }
+    // Avança índice da nota atual (highlight segue o som, não antecipa)
+    while(_currentNoteIdx<_events.length-1 && seg>=_events[_currentNoteIdx].time+_events[_currentNoteIdx].dur-_events[_currentNoteIdx].dur*.1){
+      _currentNoteIdx++;
+    }
+    if(_currentNoteIdx!==lastNoteIdx){
+      clearNoteGlow();
+      drawNoteGlow(_currentNoteIdx);
+      lastNoteIdx=_currentNoteIdx;
+    }
   },50);
   Tone.Transport.start();
   _playing=true;$('playBtn').textContent='⏸';{const fp=$('floatPlay');if(fp)fp.textContent='⏸';}
@@ -1486,6 +2153,8 @@ async function audioPlay(){
 function audioStop(){
   Tone.Transport.stop();Tone.Transport.cancel();
   _playing=false;$('playBtn').textContent='▶';
+  clearNoteHighlights();
+  clearNoteGlow();
   $('progFill').style.width='0%';$('alog').textContent='Parado.';
   const mb=$('metroBlink'); if(mb) mb.style.background='var(--line)';
   const ci=$('compassoInd'); if(ci) ci.textContent='compasso — · tempo —';
@@ -1510,30 +2179,42 @@ function toggleMetro(){
 // ══════════════════════════════════════════════════════════
 //  EXPORTAÇÃO MIDI
 // ══════════════════════════════════════════════════════════
-const MIDI_BASE={1:60,2:62,3:64,4:65,5:67,6:69,7:71};
-const DUR_MWJ={w:'1',h:'2',q:'4',e:'8',s:'16',t:'32'};
+function beatsToMidiStr(beats){
+  if(beats < 0.001) return '0';
+  const STDS = [4,'1',2,'2',1,'4',0.5,'8',0.25,'16',0.125,'32'];
+  for(let i=0;i<STDS.length;i+=2){
+    if(Math.abs(beats-STDS[i]) < 0.01) return STDS[i+1];
+  }
+  for(let i=0;i<STDS.length;i+=2){
+    if(Math.abs(beats-STDS[i]*1.5) < 0.01) return [STDS[i+1],STDS[i+1]==='32'?'64':STDS[i-1]||'8'];
+  }
+  let best='4',bd=99;
+  for(let i=0;i<STDS.length;i+=2){const d=Math.abs(beats-STDS[i]);if(d<bd){bd=d;best=STDS[i+1];}}
+  return best;
+}
 
 function exportMidi(){
   const s=ta.value.trim();
   if(!s){$('explog').textContent='Sem sintaxe.';return;}
   try{
+    parseSintaxeAudio(s);
+    if(!_events.length){$('explog').textContent='Sem notas.';return;}
     const W=window.MidiWriter;
+    const bpm=parseFloat($('bpmVal').value)||80;
     const track=new W.Track();
-    track.addEvent(new W.ProgramChangeEvent({instrument:1}));
-    const toks=s.replace(/,/g,' , ').split(/\s+/).filter(Boolean);
-    for(const tok of toks){
-      if(tok===','||tok==='|') continue;
-      const m=tok.match(/^(\d)([#b])?(w|h|q|e|s|t)?(\.)?(~)?/);
-      if(!m) continue;
-      const grau=+m[1],acc=m[2]||'',durK=m[3]||'q',dot=!!m[4];
-      const dur=DUR_MWJ[durK]||'4';
-      if(grau===0){
-        track.addEvent(new W.NoteEvent({pitch:[],duration:dur,wait:'0',velocity:0}));
-      }else{
-        const midi=(MIDI_BASE[grau]||60)+(acc==='#'?1:acc==='b'?-1:0);
-        const p=W.Utils.getPitch(midi);
-        track.addEvent(new W.NoteEvent({pitch:[p],duration:dot?[dur,dur+'.']:dur,velocity:80}));
-      }
+    track.setTempo(bpm);
+    let prevTime=0;
+    for(const ev of _events){
+      const waitBeats=(ev.time-prevTime)*bpm/60;
+      const durBeats=ev.dur*bpm/60;
+      const ws=beatsToMidiStr(waitBeats);
+      track.addEvent(new W.NoteEvent({
+        pitch:[ev.note||'C4'],
+        duration:beatsToMidiStr(durBeats),
+        wait:ws,
+        velocity:ev.note?80:0
+      }));
+      prevTime=ev.time;
     }
     dlBlob(new Blob([new Uint8Array(new W.Writer([track]).buildFile())],{type:'audio/midi'}),
            ($('titulo').value||'cromus')+'.mid');
@@ -1666,6 +2347,239 @@ function useImported(){
 }
 
 // ══════════════════════════════════════════════════════════
+//  REAL TABLATURA
+// ══════════════════════════════════════════════════════════
+const GRAU_NOME_ROM = {1:'I',2:'II',3:'III',4:'IV',5:'V',6:'VI',7:'VII'};
+const CORES_RNFG = {1:'#C0001A',2:'#ECD200',3:'#F07300',4:'#00B050',5:'#0066FF',6:'#8B5E00',7:'#9B5FC0'};
+const GRAU_FORMA = {1:'circulo',2:'ogiva',3:'triangulo',4:'quadrado',5:'estrela',6:'hexagono',7:'casinha'};
+const GRAU_FORMA_NOME = {1:'círculo',2:'ogiva',3:'triângulo',4:'quadrado',5:'estrela',6:'hexágono',7:'casinha'};
+const FORMA_SVG = {
+  circulo:  (x,y,r,c) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" opacity=".85"/>`,
+  ogiva:    (x,y,r,c) => `<path d="M${x} ${y-r} Q${x+r} ${y} ${x} ${y+r} Q${x-r} ${y} ${x} ${y-r}z" fill="${c}" opacity=".85"/>`,
+  triangulo:(x,y,r,c) => `<polygon points="${x},${y-r} ${x+r*0.866},${y+r*0.5} ${x-r*0.866},${y+r*0.5}" fill="${c}" opacity=".85"/>`,
+  quadrado: (x,y,r,c) => `<rect x="${x-r*0.7}" y="${y-r*0.7}" width="${r*1.4}" height="${r*1.4}" fill="${c}" opacity=".85"/>`,
+  estrela:  (x,y,r,c) => { const p=[]; for(let i=0;i<5;i++){const a=-Math.PI/2+i*2*Math.PI/5,b=a+Math.PI/5;p.push(`${x+r*0.9*Math.cos(a)},${y+r*0.9*Math.sin(a)} ${x+r*0.4*Math.cos(b)},${y+r*0.4*Math.sin(b)}`)} return `<polygon points="${p.join(' ')}" fill="${c}" opacity=".85"/>`; },
+  hexagono: (x,y,r,c) => { const p=[]; for(let i=0;i<6;i++){const a=Math.PI/6+i*Math.PI/3;p.push(`${x+r*Math.cos(a)},${y+r*Math.sin(a)}`)} return `<polygon points="${p.join(' ')}" fill="${c}" opacity=".85"/>`; },
+  casinha:  (x,y,r,c) => `<path d="M${x-r*0.7} ${y+r*0.5} L${x-r*0.7} ${y-r*0.15} L${x} ${y-r*0.85} L${x+r*0.7} ${y-r*0.15} L${x+r*0.7} ${y+r*0.5} Z" fill="${c}" opacity=".85"/>`,
+};
+
+function syncTabSintaxe(){
+  $('tabSintaxe').value=$('sintaxe').value;
+  gerarTab();
+}
+
+let _tabDebounce = null;
+function tabAutoParse(){
+  clearTimeout(_tabDebounce);
+  _tabDebounce = setTimeout(()=>gerarTab(), 600);
+}
+
+async function gerarTab(){
+  const sintaxe = $('tabSintaxe').value.trim();
+  if(!sintaxe){ $('tabOutput').innerHTML='<div style="color:var(--err)">Digite uma sintaxe primeiro.</div>'; return; }
+  const tonalidade = $('tabTonalidade').value;
+  $('tabOutput').innerHTML='<div style="color:var(--dim)">Gerando…</div>';
+  try{
+    const r = await fetch('/tab_info',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sintaxe,tonalidade})});
+    const d = await r.json();
+    if(!d.ok){ $('tabOutput').innerHTML='<div style="color:var(--err)">'+esc(d.erro||'erro')+'</div>'; return; }
+    renderFretboard(d.notas, tonalidade);
+  }catch(e){ $('tabOutput').innerHTML='<div style="color:var(--err)">Erro: '+esc(e.message)+'</div>'; }
+}
+
+function renderFretboard(notas, tonalidade){
+  const W=620, H=310, marg=44, strings=6, stepY=18;
+  const svg = [];
+  svg.push(`<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:680px;background:var(--bg);border-radius:8px;display:block">`);
+  svg.push(`<defs><filter id="gshadow"><feDropShadow dx="0" dy="0.5" stdDeviation="1" flood-opacity=".5"/></filter></defs>`);
+  svg.push(`<rect width="${W}" height="${H}" fill="var(--bg)" rx="6"/>`);
+  // título da tonalidade
+  svg.push(`<text x="${marg}" y="18" font-size="12" font-weight="700" fill="var(--ink)">Real Tablatura — ${tonalidade}</text>`);
+  // braço
+  const y0 = 38;
+  const stepX = (W-marg*2)/(strings-1);
+  for(let s=0; s<strings; s++){
+    const x = marg + s*stepX;
+    svg.push(`<line x1="${x}" y1="${y0}" x2="${x}" y2="${y0+12*stepY}" stroke="var(--line)" stroke-width="1.2"/>`);
+  }
+  for(let f=0; f<=12; f++){
+    const y = y0 + f*stepY;
+    svg.push(`<line x1="${marg}" y1="${y}" x2="${marg+(strings-1)*stepX}" y2="${y}" stroke="var(--line)" stroke-width="${f===0?2.5:.6}"/>`);
+    if(f>0) svg.push(`<text x="${marg-9}" y="${y+4}" font-size="9" fill="var(--dim)" text-anchor="end" font-weight="${f===12?'600':'400'}">${f}</text>`);
+  }
+  // nomes das cordas
+  const nomesCordas = ['e','B','G','D','A','E'];
+  for(let s=0; s<strings; s++){
+    const x = marg + s*stepX;
+    svg.push(`<text x="${x}" y="${y0-7}" font-size="9" font-weight="700" fill="var(--dim)" text-anchor="middle">${nomesCordas[s]}</text>`);
+  }
+  // marcação de casa (bolinha no 3, 5, 7, 9, 12)
+  const dots = {3:0,5:1,7:1,9:1,12:2};
+  for(const f in dots){
+    if(dots[f]===0){
+      svg.push(`<circle cx="${marg+(strings-1)*stepX/2}" cy="${y0+f*stepY}" r="2.5" fill="var(--dim)" opacity=".3"/>`);
+    } else {
+      const off = stepX*1.2;
+      svg.push(`<circle cx="${marg+off}" cy="${y0+f*stepY}" r="2" fill="var(--dim)" opacity=".3"/>`);
+      svg.push(`<circle cx="${marg+(strings-1)*stepX-off}" cy="${y0+f*stepY}" r="2" fill="var(--dim)" opacity=".3"/>`);
+    }
+  }
+  // agrupar notas por posição
+  const posMap = {};
+  for(const n of notas){
+    if(!n.posicao) continue;
+    const key = n.posicao.string+'-'+n.posicao.fret;
+    if(!posMap[key]) posMap[key] = [];
+    posMap[key].push(n);
+  }
+  const stepOff = [0, 10, -10, 17, -17];
+  for(const key in posMap){
+    const group = posMap[key];
+    const p = group[0].posicao;
+    const count = group.length;
+    const baseX = marg + (6-p.string)*stepX;
+    const y = y0 + p.fret*stepY;
+    for(let i=0; i<count; i++){
+      const n = group[i];
+      const offX = stepOff[i] || stepOff[0];
+      const x = baseX + (count>1 ? offX : 0);
+      const cor = CORES_RNFG[n.grau]||'#888';
+      const forma = GRAU_FORMA[n.grau]||'circulo';
+      // glow sutil atrás da forma
+      svg.push(`<circle cx="${x}" cy="${y}" r="8" fill="${cor}33" stroke="${cor}" stroke-width="1.5" filter="url(#gshadow)"/>`);
+      // forma RNFG como marcador principal
+      if(FORMA_SVG[forma]){
+        svg.push(FORMA_SVG[forma](x, y, 6, cor));
+      }
+      // tooltip
+      svg.push(`<title>${GRAU_NOME_ROM[n.grau]||'?'} — ${n.nota}${n.oitava!==0?(n.oitava>0?"'":"".repeat(-n.oitava)):''} (corda ${p.string}, traste ${p.fret})</title>`);
+    }
+  }
+  svg.push('</svg>');
+  // legenda RNFG com formas
+  let html = svg.join('');
+  html += '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;font:11px var(--mono);align-items:center">';
+  html += `<span style="font-weight:600;font-size:10px;color:var(--dim);margin-right:4px">RNFG:</span>`;
+  for(let g=1; g<=7; g++){
+    const cor = CORES_RNFG[g];
+    const fsvg = FORMA_SVG[GRAU_FORMA[g]];
+    html += `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;background:${cor}22;border-radius:4px;border:1px solid ${cor}44">
+      <svg width="14" height="14" viewBox="0 0 14 14">`;
+    if(fsvg) html += fsvg(7, 7, 5, cor);
+    html += `</svg>
+      <span style="color:${cor};font-weight:600">${GRAU_NOME_ROM[g]}</span></span>`;
+  }
+  html += '</div>';
+  // tab tradicional com números coloridos RNFG
+  html += '<div style="margin-top:8px;font:11px var(--mono);overflow-x:auto;white-space:pre;color:var(--dim)"><strong>Tablatura RNFG:</strong><br>';
+  const tabStrs = ['e-···','B-···','G-···','D-···','A-···','E-···'];
+  // Guardar cores por posição para aplicar na tab
+  const corMap = {};
+  for(const n of notas){
+    if(!n.posicao) continue;
+    const key = n.posicao.string;
+    if(!corMap[key]) corMap[key] = [];
+    corMap[key].push({'fret': n.posicao.fret, 'cor': CORES_RNFG[n.grau]||'var(--dim)'});
+  }
+  // Gerar tab com <span> coloridos
+  // Primeiro construir as linhas como arrays de partes
+  const tabParts = [
+    {str:'e', parts:[{txt:'-···',cor:null}]},
+    {str:'B', parts:[{txt:'-···',cor:null}]},
+    {str:'G', parts:[{txt:'-···',cor:null}]},
+    {str:'D', parts:[{txt:'-···',cor:null}]},
+    {str:'A', parts:[{txt:'-···',cor:null}]},
+    {str:'E', parts:[{txt:'-···',cor:null}]},
+  ];
+  for(const n of notas){
+    if(!n.posicao) continue;
+    const p = n.posicao;
+    const fr = String(p.fret).padStart(2,' ');
+    const cor = CORES_RNFG[n.grau]||'var(--dim)';
+    const idx = p.string-1;
+    for(let s=0; s<6; s++){
+      if(s===idx){
+        tabParts[s].parts.push({txt:fr, cor:cor});
+      } else {
+        tabParts[s].parts.push({txt:'··', cor:null});
+      }
+      tabParts[s].parts.push({txt:'·', cor:null});
+    }
+  }
+  for(let s=5; s>=0; s--){
+    html += tabParts[s].str + '·';
+    for(const p of tabParts[s].parts){
+      if(p.cor){
+        html += `<span style="color:${p.cor};font-weight:600">${p.txt}</span>`;
+      } else {
+        html += p.txt;
+      }
+    }
+    html += '<br>';
+  }
+  html += '</div>';
+  // sequência de graus coloridos
+  html += '<div style="margin-top:5px;font:11px var(--mono);color:var(--dim)">';
+  html += '<strong>Graus:</strong> ';
+  for(const n of notas){
+    const cor = CORES_RNFG[n.grau]||'#888';
+    html += `<span style="display:inline-block;width:16px;text-align:center;color:${cor};font-weight:700">${n.grau}</span>`;
+  }
+  html += '</div>';
+  html += `<div style="font:10px var(--mono);color:var(--dim);margin-top:4px">${notas.length} notas · ${tonalidade}</div>`;
+  $('tabOutput').innerHTML = html;
+}
+function grau_forma_nome(g){ return GRAU_FORMA_NOME[g]||'—'; }
+
+// ══════════════════════════════════════════════════════════
+//  HARMONIA REAL
+// ══════════════════════════════════════════════════════════
+async function gerarHarmonia(){
+  const cifra = $('harmCifra').value.trim();
+  if(!cifra){ $('harmOutput').innerHTML='<div style="color:var(--err)">Digite uma cifra.</div>'; return; }
+  const tonalidade = $('harmTonalidade').value;
+  const modo = $('harmModo').value;
+  $('harmOutput').innerHTML='<div style="color:var(--dim)">Analisando…</div>';
+  try{
+    const r = await fetch('/harmonia_info',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cifra,tonalidade,modo})});
+    const d = await r.json();
+    if(!d.ok){ $('harmOutput').innerHTML='<div style="color:var(--err)">'+esc(d.erro||'erro')+'</div>'; return; }
+    renderHarmonia(d, cifra, tonalidade);
+  }catch(e){ $('harmOutput').innerHTML='<div style="color:var(--err)">Erro: '+esc(e.message)+'</div>'; }
+}
+
+function renderHarmonia(d, cifra, tonalidade){
+  const notas = d.notas||[];
+  let html = `<div style="margin-bottom:8px;font-size:15px"><strong>${esc(cifra)}</strong> em <strong>${tonalidade}</strong></div>`;
+  html += '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">';
+  for(const n of notas){
+    const cor = n.cor||'#888';
+    const formaNome = GRAU_FORMA[n.grau]||'circulo';
+    html += `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;
+      padding:10px;background:${cor}22;border:1px solid ${cor}44;border-radius:10px;min-width:80px">`;
+    // forma SVG
+    const fsvg = FORMA_SVG[formaNome];
+    if(fsvg){
+      html += `<svg width="40" height="40" viewBox="0 0 40 40">`;
+      html += fsvg(20, 20, 14, cor);
+      html += `</svg>`;
+    }
+    html += `<div style="font-weight:600;font-size:18px;color:${cor}">${n.nome||'?'}</div>`;
+    html += `<div style="font:12px var(--mono);color:var(--dim)">${n.nota||'?'}</div>`;
+    if(n.grau) html += `<div style="font:11px var(--mono);color:var(--dim)">${grau_forma_nome(n.grau)}</div>`;
+    html += '</div>';
+  }
+  html += '</div>';
+  // legenda
+  html += '<div style="margin-top:12px;font:11px var(--mono);color:var(--dim)">';
+  html += 'Grau: forma geométrica   |   Cor: nota fixa (RNFG)';
+  html += '</div>';
+  $('harmOutput').innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════════════════
 atualizarInfo();
@@ -1703,9 +2617,14 @@ class Handler(BaseHTTPRequestHandler):
         p=self.path
         if p=="/render":
             d=self._json()
+            modo=d.get("modo","REAL")
             try:
-                res=compilar(d.get("sintaxe",""),d.get("modo","REAL"),
-                              d.get("titulo","Sem título"),d.get("compasso","2/4"))
+                if modo=="TAB":
+                    res=compilar_tab(d.get("sintaxe",""),
+                                     d.get("titulo","Sem título"),d.get("compasso","2/4"))
+                else:
+                    res=compilar(d.get("sintaxe",""),modo,
+                                  d.get("titulo","Sem título"),d.get("compasso","2/4"))
             except Exception as e:
                 res={"ok":False,"log":str(e)}
             self._send(200,json.dumps(res),"application/json; charset=utf-8")
@@ -1728,6 +2647,40 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200,json.dumps(res),"application/json; charset=utf-8")
             except Exception as e:
                 self._send(200,json.dumps({"ok":False,"erro":str(e)}),"application/json; charset=utf-8")
+        elif p=="/tab_info":
+            import rng_common as rng
+            d=self._json()
+            sint=d.get("sintaxe","")
+            ton=d.get("tonalidade","C")
+            notas=rng.sintaxe_para_notas(sint, ton)
+            for n in notas:
+                oit = n["oitava"] + 4  # oitava 0 = C4
+                mel = rng.nota_melhor_posicao(n["nota"], oit)
+                n["posicao"] = mel
+            self._send(200, json.dumps({"ok":True,"notas":notas}), "application/json; charset=utf-8")
+        elif p=="/harmonia_info":
+            import rng_common as rng
+            d=self._json()
+            cif=d.get("cifra","")
+            ton=d.get("tonalidade","C")
+            modo=d.get("modo","maior")
+            graus=rng.cifra_para_graus(cif, ton, modo)
+            self._send(200, json.dumps({"ok":True,"notas":graus}), "application/json; charset=utf-8")
+        elif p=="/normalizar":
+            d=self._json()
+            txt=d.get("texto","")
+            normalizado=txt.translate(str.maketrans({
+                "\u2019":"'","\u2018":"'","\u201b":"'","\u0060":"'","\u00b4":"'",
+                "\u201c":'"',"\u201d":'"',"\u201e":'"',
+            }))
+            self._send(200,json.dumps({"ok":True,"sintaxe":normalizado}),
+                "application/json; charset=utf-8")
+        elif p=="/export/midi":
+            self._send(200,json.dumps({"ok":False,"erro":"MIDI export não implementado no backend."}),
+                "application/json; charset=utf-8")
+        elif p=="/export/wav":
+            self._send(200,json.dumps({"ok":False,"erro":"WAV export não implementado no backend."}),
+                "application/json; charset=utf-8")
         else:
             self._send(404,b"not found","text/plain")
 
@@ -1750,6 +2703,7 @@ def main():
     print(f"🎼  Note Form Pro v2.1 → {url}  (Ctrl+C para sair)")
     print("    ✦ Undo/Redo  ✦ Atalhos à la Sibelius  ✦ Contador de compassos")
     print("    ✦ Tema claro/escuro  ✦ Busca inline  ✦ Preview RNFG  ✦ Log histórico")
+    print("    ✦ Real Tablatura (🎸)  ✦ Harmonia Real (🎵)")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     ThreadingHTTPServer(("127.0.0.1",PORT),Handler).serve_forever()
 

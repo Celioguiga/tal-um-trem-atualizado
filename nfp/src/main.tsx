@@ -15,6 +15,8 @@ import { CalendarPage } from "./components/calendar/CalendarPage";
 import { ReferencesPage } from "./components/references/ReferencesPage";
 import { BrandPage } from "./components/brand/BrandPage";
 import { ProfilePage } from "./components/profile/ProfilePage";
+import { NfpPage } from "./components/nfp/NfpPage";
+import { RealTablaturaPage } from "./components/real-tablatura/RealTablaturaPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -27,27 +29,30 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <AuthProvider>
         <ThemeProvider>
-        <Routes>
-          <Route path="/" element={<LoginPage />} />
-          <Route path="/registrar" element={<RegisterPage />} />
-          <Route path="/consentimento" element={<ConsentPage />} />
-          <Route
-            path="/app"
-            element={
-              <ProtectedRoute>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<DashboardPage />} />
-            <Route path="booklets" element={<BookletsPage />} />
-            <Route path="campanhas" element={<CampaignsPage />} />
-            <Route path="calendar" element={<CalendarPage />} />
-            <Route path="references" element={<ReferencesPage />} />
-            <Route path="brand" element={<BrandPage />} />
-            <Route path="perfil" element={<ProfilePage />} />
-          </Route>
-        </Routes>
+          <Routes>
+            <Route path="/" element={<LoginPage />} />
+            <Route path="/registrar" element={<RegisterPage />} />
+            <Route path="/consentimento" element={<ConsentPage />} />
+            <Route
+              path="/app"
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="nfp" replace />} />
+              <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="booklets" element={<BookletsPage />} />
+              <Route path="campanhas" element={<CampaignsPage />} />
+              <Route path="calendario" element={<CalendarPage />} />
+              <Route path="referencias" element={<ReferencesPage />} />
+              <Route path="brand" element={<BrandPage />} />
+              <Route path="perfil" element={<ProfilePage />} />
+              <Route path="nfp" element={<NfpPage />} />
+              <Route path="tablatura" element={<RealTablaturaPage />} />
+            </Route>
+          </Routes>
         </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>

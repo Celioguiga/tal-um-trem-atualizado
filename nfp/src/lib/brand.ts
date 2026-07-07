@@ -1,73 +1,101 @@
-/* ── Note Form Pro — Identidade Visual ── */
+export const SYMUSIC = {
+  name: "Synemusic",
+  tagline: "A música que se vê.",
+  concept: "A senoide mais pura da física do som. A marca não é uma das sete formas-grau: é a onda que as carrega todas. Som puro atravessado pelas sete cores.",
+  url: "https://synemusic.com.br",
+  version: "v0.1.0",
+} as const;
 
 export const BRAND = {
   name: "Note Form Pro",
   tagline: "Real Nota Forma Grau",
-  ecosystem: "Synemusic",
-  url: "https://synemusic.com.br",
+  ecosystem: SYMUSIC.name,
+  motherTagline: SYMUSIC.tagline,
 } as const;
 
-/* ── Paleta RNFG (cores absolutas das notas) ── */
 export const RNFG = {
-  do:   { hex: "#C0001A", nome: "Dó",   grau: "I",   forma: "Círculo" },
-  re:   { hex: "#ECD200", nome: "Ré",   grau: "II",  forma: "Ogiva" },
-  mi:   { hex: "#F07300", nome: "Mi",   grau: "III", forma: "Triângulo" },
-  fa:   { hex: "#00B050", nome: "Fá",   grau: "IV",  forma: "Quadrado" },
-  sol:  { hex: "#0066FF", nome: "Sol",  grau: "V",   forma: "Estrela" },
-  la:   { hex: "#8B5E00", nome: "Lá",   grau: "VI",  forma: "Hexágono" },
-  si:   { hex: "#9B5FC0", nome: "Si",   grau: "VII", forma: "Casinha" },
+  do:   { hex: "#C0001A", nome: "Dó",   grau: "I",   forma: "Círculo",   rainha: "Rainha Fada do Fogo" },
+  re:   { hex: "#ECD200", nome: "Ré",   grau: "II",  forma: "Ogiva",     rainha: "Rainha Fada da Luz" },
+  mi:   { hex: "#F07300", nome: "Mi",   grau: "III", forma: "Triângulo", rainha: "Rainha Fada da Chama" },
+  fa:   { hex: "#00B050", nome: "Fá",   grau: "IV",  forma: "Quadrado",  rainha: "Rainha Fada da Floresta" },
+  sol:  { hex: "#0066FF", nome: "Sol",  grau: "V",   forma: "Estrela",  rainha: "Rainha Fada do Céu" },
+  la:   { hex: "#8B5E00", nome: "Lá",   grau: "VI",  forma: "Hexágono",  rainha: "Rainha Fada da Terra" },
+  si:   { hex: "#9B5FC0", nome: "Si",   grau: "VII", forma: "Casinha",  rainha: "Rainha Fada do Sonho" },
 } as const;
 
 export const RNFG_ARRAY = Object.values(RNFG);
 
-/* ── Paleta da Marca ── */
 export const BRAND_COLORS = {
-  primary:   "#0066FF",  // Sol — azul é a cor principal da marca
-  primaryBg: "#0066FF10",
-  accent:    "#9B5FC0",  // Si — lilás como cor secundária
-  accentBg:  "#9B5FC020",
-  success:   "#00B050",  // Fá — verde para sucesso
-  warning:   "#F07300",  // Mi — laranja para aviso
-  error:     "#C0001A",  // Dó — vermelho para erro
-  surface:   "#141414",
-  surface2:  "#1a1a1a",
-  border:    "#222222",
-  text:      "#e8e8e8",
-  textDim:   "#888888",
-  textMuted: "#555555",
-  bg:        "#0a0a0a",
+  gold:      "#E8A820",
+  goldGlow:  "#E8A82020",
+  primary:   "#0066FF",
+  accent:    "#9B5FC0",
+  success:   "#00B050",
+  warning:   "#F07300",
+  error:     "#C0001A",
+  ink:       "#141009",
+  inkRaise:  "#1A1610",
+  inkLine:   "#2A241A",
+  ivory:     "#F5F2EA",
+  parch:     "#A69B85",
+  parchDim:  "#6F664F",
+  surface:   "#1A1610",
+  surface2:  "#251F17",
+  border:    "#2A241A",
+  text:      "#F5F2EA",
+  textDim:   "#A69B85",
+  textMuted: "#6F664F",
+  bg:        "#141009",
 } as const;
 
-/* ── Tipografia ── */
 export const TYPOGRAPHY = {
-  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-  fontMono:   "'JetBrains Mono', 'Fira Code', monospace",
-  weights:    { light: 300, regular: 400, medium: 600, bold: 700, extrabold: 800 },
+  fontFamily:  "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+  fontDisplay: "'Cormorant Garamond', Georgia, serif",
+  fontMono:    "'JetBrains Mono', monospace",
+  weights:     { light: 300, regular: 400, medium: 500, semibold: 600, bold: 700 },
 } as const;
 
-/* ── Gradiente da marca (arco-íris RNFG) ── */
 export const BRAND_GRADIENT = `linear-gradient(135deg,
   ${RNFG.do.hex}, ${RNFG.mi.hex}, ${RNFG.re.hex},
   ${RNFG.fa.hex}, ${RNFG.sol.hex}, ${RNFG.la.hex}, ${RNFG.si.hex})`;
 
-/* ── Formas em SVG (path data) ── */
-export const SHAPE_PATHS = {
-  circulo:  "M12,0A12,12 0 1,0 12,24A12,12 0 1,0 12,0Z",
-  ogiva:    "M12,0 L24,12 L12,24 L0,12 Z",
-  triangulo:"M12,0 L24,21 L0,21 Z",
-  quadrado: "M0,0 L24,0 L24,24 L0,24 Z",
-  estrela:  "M12,0 L14.8,9 L24,9 L16.4,14.5 L19.2,24 L12,18.5 L4.8,24 L7.6,14.5 L0,9 L9.2,9 Z",
-  hexagono: "M12,0 L22,6 L22,18 L12,24 L2,18 L2,6 Z",
-  casinha:  "M12,0 L24,9.4 L24,24 L0,24 L0,9.4 Z",
-} as const;
+export const WAVE_PATH = "M 20 60 C 31.11 42.2 42.22 26 53.33 26 C 64.44 26 75.56 42.2 86.67 60 C 97.78 77.8 108.89 94 120 94 C 131.11 94 142.22 77.8 153.33 60 C 164.44 42.2 175.56 26 186.67 26 C 197.78 26 208.89 42.2 220 60";
 
-/* ── Formas em CSS clip-path ── */
+export const WAVE_NODES = [
+  { x: 20,    y: 60,  c: RNFG.do.hex },
+  { x: 53.33, y: 26,  c: RNFG.re.hex },
+  { x: 86.67, y: 60,  c: RNFG.mi.hex },
+  { x: 120,   y: 94,  c: RNFG.fa.hex },
+  { x: 153.33,y: 60,  c: RNFG.sol.hex },
+  { x: 186.67,y: 26,  c: RNFG.la.hex },
+  { x: 220,   y: 60,  c: RNFG.si.hex },
+];
+
+export const ARCHITECTURE: Record<string, { cor: string; desc: string }> = {
+  "RNFG":         { cor: RNFG.do.hex,  desc: "O núcleo. A escrita musical de cor, forma e grau." },
+  "Krisícho":     { cor: RNFG.si.hex,  desc: "Narrativa transmídia — Rainhas Fadas e Reis Duendes." },
+  "Maestro":      { cor: RNFG.sol.hex, desc: "Tutor socrático e gestor estratégico do sistema." },
+  "Pro / NFP":    { cor: RNFG.mi.hex,  desc: "O motor Cromus que converte sintaxe em partitura RNFG." },
+  "Real Tablatura":{ cor: RNFG.fa.hex, desc: "Extensão da metodologia para violão e cordas." },
+  "Acervo GRAU":  { cor: RNFG.la.hex,  desc: "Catálogo de cantigas e obras para a prática." },
+};
+
 export const SHAPE_CLIP = {
-  circulo:  "circle(50%)",
-  ogiva:    "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
+  circulo:  "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
+  ogiva:    "polygon(20% 0%, 80% 0%, 100% 50%, 80% 100%, 20% 100%, 0% 50%)",
   triangulo:"polygon(50% 0%, 100% 100%, 0% 100%)",
   quadrado: "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",
   estrela:  "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)",
-  hexagono: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-  casinha:  "polygon(50% 0%, 100% 39%, 100% 100%, 0% 100%, 0% 39%)",
+  hexagono: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
+  casinha:  "polygon(50% 0%, 100% 50%, 100% 100%, 0% 100%, 0% 50%)",
+} as const;
+
+export const SHAPE_PATHS = {
+  circulo:  "M12,0A12,12 0 1,0 12,24A12,12 0 1,0 12,0Z",
+  ogiva:    "M10,50 Q50,14 90,50 Q50,86 10,50 Z",
+  triangulo:"M50,13 L84,73 L16,73 Z",
+  quadrado: "M17,17 L83,17 L83,83 L17,83 Z",
+  estrela:  "M50,10 L59.4,37.06 L88.04,37.64 L65.22,54.94 L73.51,82.36 L50,66 L26.49,82.36 L34.78,54.94 L11.96,37.64 L40.6,37.06 Z",
+  hexagono: "M10,50 L30,25 L70,25 L90,50 L70,75 L30,75 Z",
+  casinha:  "M50,16 L82,48 L73,48 L73,84 L27,84 L27,48 L18,48 Z",
 } as const;

@@ -7,9 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": {
-        target: "http://localhost:4243",
+      "/api/nfp": {
+        target: "http://localhost:4242",
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/nfp/, ""),
       },
     },
   },
