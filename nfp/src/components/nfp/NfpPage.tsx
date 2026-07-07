@@ -86,6 +86,23 @@ const CORE: Record<number, string> = {
   1: "#C0001A", 2: "#ECD200", 3: "#F07300",
   4: "#00B050", 5: "#0066FF", 6: "#8B5E00", 7: "#9B5FC0",
 };
+function RhythmBtn({ onClick, title, children, vars }: {
+  onClick: () => void; title?: string; children: React.ReactNode;
+  vars: Record<string, string>;
+}) {
+  return (
+    <button onClick={onClick} title={title}
+      className="px-1.5 py-0.5 rounded leading-none transition-colors hover:brightness-125 shrink-0"
+      style={{
+        background: vars["--surface2"], color: vars["--text"], fontSize: 13, fontFamily: "inherit",
+        border: "1px solid transparent",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = vars["--accent"]; e.currentTarget.style.color = "#fff"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = vars["--surface2"]; e.currentTarget.style.color = vars["--text"]; }}
+    >{children}</button>
+  );
+}
+
 const BASE_FREQ = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88];
 const BPM = 120;
 const BEAT_DUR = 60 / BPM;
@@ -735,6 +752,56 @@ export function NfpPage() {
           style={{ background: vars["--bg"], color: vars["--text"], border: `1px solid ${vars["--border"]}` }}
           disabled={!result?.ly}
         >🎼 LilyPond</button>
+      </div>
+
+      {/* ── Barra de inserção rítmica ── */}
+      <div className="flex items-center gap-0.5 px-2 py-1 text-xs shrink-0 overflow-x-auto"
+        style={{ background: vars["--surface"], borderBottom: `1px solid ${vars["--border"]}` }}
+      >
+        <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>BARRAS</span>
+        <RhythmBtn onClick={() => insertAtCursor(" | ")} title="Barra simples" vars={vars}>|</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" || ")} title="Barra dupla" vars={vars}>𝄁</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor("\nFIM")} title="Barra final" vars={vars}>𝄂</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" ||: ")} title="Abre repetição" vars={vars}>𝄆</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" :|| ")} title="Fecha repetição" vars={vars}>𝄇</RhythmBtn>
+        <RhythmBtn onClick={() => {
+          const el = textareaRef.current; if (!el) return;
+          const start = el.selectionStart;
+          setSintaxe(sintaxe.substring(0, start) + "\n(CASA1)" + sintaxe.substring(el.selectionEnd));
+        }} title="Casa 1" vars={vars}>C¹</RhythmBtn>
+        <RhythmBtn onClick={() => {
+          const el = textareaRef.current; if (!el) return;
+          const start = el.selectionStart;
+          setSintaxe(sintaxe.substring(0, start) + "\n(CASA2)" + sintaxe.substring(el.selectionEnd));
+        }} title="Casa 2" vars={vars}>C²</RhythmBtn>
+
+        <div className="w-px h-4 mx-1 shrink-0" style={{ background: vars["--border"] }} />
+
+        <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>LIG</span>
+        <RhythmBtn onClick={() => insertAtCursor(" + ")} title="Ligadura" vars={vars}>+</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor("*")} title="Nota pontuada" vars={vars}>·</RhythmBtn>
+
+        <div className="w-px h-4 mx-1 shrink-0" style={{ background: vars["--border"] }} />
+
+        <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>FIGURAS</span>
+        <RhythmBtn onClick={() => insertAtCursor(" 1w")} title="Semibreve" vars={vars}>𝅝</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1h")} title="Mínima" vars={vars}>𝅗𝅥</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1q")} title="Semínima" vars={vars}>♩</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1e")} title="Colcheia" vars={vars}>♪</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1s")} title="Semicolcheia" vars={vars}>𝅘𝅥𝅰</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1t")} title="Fusa" vars={vars}>𝅘𝅥𝅱</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1i")} title="Semifusa" vars={vars}>𝅘𝅥𝅲</RhythmBtn>
+
+        <div className="w-px h-4 mx-1 shrink-0" style={{ background: vars["--border"] }} />
+
+        <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>PAUSAS</span>
+        <RhythmBtn onClick={() => insertAtCursor(" 0w")} title="Pausa de semibreve" vars={vars}>𝄻</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0h")} title="Pausa de mínima" vars={vars}>𝄼</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0q")} title="Pausa de semínima" vars={vars}>𝄽</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0e")} title="Pausa de colcheia" vars={vars}>𝄾</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0s")} title="Pausa de semicolcheia" vars={vars}>𝄿</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0t")} title="Pausa de fusa" vars={vars}>𝅀</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0i")} title="Pausa de semifusa" vars={vars}>𝅁</RhythmBtn>
       </div>
 
       {showRecorder && (
