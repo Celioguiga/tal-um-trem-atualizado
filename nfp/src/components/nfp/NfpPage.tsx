@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useTheme } from "../../lib/theme";
 import { useAuth } from "../../lib/auth";
 import { RecorderPanel } from "./RecorderPanel";
@@ -671,9 +671,9 @@ export function NfpPage() {
         />
 
         <input value={compositor} onChange={(e) => setCompositor(e.target.value)}
-          className="px-2 py-1 rounded border text-sm w-28"
+          className="px-2 py-1 rounded border text-sm w-20"
           style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
-          placeholder="Compositor"
+          placeholder="Autor"
         />
 
         <select value={compasso} onChange={(e) => setCompasso(e.target.value)}
@@ -719,15 +719,6 @@ export function NfpPage() {
             <option value="14/8">14/8</option>
             <option value="15/8">15/8</option>
           </optgroup>
-        </select>
-
-        <select value={tonalidade} onChange={(e) => setTonalidade(e.target.value)}
-          className="px-2 py-1 rounded border text-sm w-24"
-          style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
-        >
-          {TONALIDADES.map((t) => (
-            <option key={t.value} value={t.value}>{t.label}</option>
-          ))}
         </select>
 
         <div className="w-px h-6" style={{ background: vars["--border"] }} />
@@ -795,6 +786,18 @@ export function NfpPage() {
           style={{ background: vars["--bg"], color: vars["--text"], border: `1px solid ${vars["--border"]}` }}
           disabled={!result?.ly}
         >🎼 LilyPond</button>
+
+        <div className="w-px h-5" style={{ background: vars["--border"] }} />
+
+        <span className="text-[10px] font-semibold tracking-wider mr-0.5" style={{ color: vars["--textMuted"] }}>TOM</span>
+        <select value={tonalidade} onChange={(e) => setTonalidade(e.target.value)}
+          className="px-1.5 py-1 rounded border text-[11px] w-22"
+          style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
+        >
+          {TONALIDADES.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* ── Barra de inserção rítmica ── */}
