@@ -805,11 +805,11 @@ export function NfpPage() {
         style={{ background: vars["--surface"], borderBottom: `1px solid ${vars["--border"]}` }}
       >
         <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>BARRAS</span>
-        <RhythmBtn onClick={() => insertAtCursor(" | ")} title="Barra simples" vars={vars}>|</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" || ")} title="Barra dupla" vars={vars}>𝄁</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor("\nFIM")} title="Barra final" vars={vars}>𝄂</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" ||: ")} title="Abre repetição" vars={vars}>𝄆</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" :|| ")} title="Fecha repetição" vars={vars}>𝄇</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" | ")} title="Barra simples (|)" vars={vars}>|</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" || ")} title="Barra dupla (||)" vars={vars}>||</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor("\nFIM")} title="Barra final" vars={vars}>=|</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" ||: ")} title="Abre repetição (||:)" vars={vars}>|:</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" :|| ")} title="Fecha repetição (:||)" vars={vars}>:|</RhythmBtn>
         <RhythmBtn onClick={() => {
           const el = textareaRef.current; if (!el) return;
           const start = el.selectionStart;
@@ -830,24 +830,24 @@ export function NfpPage() {
         <div className="w-px h-4 mx-1 shrink-0" style={{ background: vars["--border"] }} />
 
         <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>FIGURAS</span>
-        <RhythmBtn onClick={() => insertAtCursor(" 1w")} title="Semibreve" vars={vars}>𝅝</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 1h")} title="Mínima" vars={vars}>𝅗𝅥</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 1q")} title="Semínima" vars={vars}>♩</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 1e")} title="Colcheia" vars={vars}>♪</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 1s")} title="Semicolcheia" vars={vars}>𝅘𝅥𝅰</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 1t")} title="Fusa" vars={vars}>𝅘𝅥𝅱</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 1i")} title="Semifusa" vars={vars}>𝅘𝅥𝅲</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1w")} title="Semibreve" vars={vars}>1/1</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1h")} title="Mínima" vars={vars}>1/2</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1q")} title="Semínima" vars={vars}>1/4</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1e")} title="Colcheia" vars={vars}>1/8</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1s")} title="Semicolcheia" vars={vars}>1/16</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1t")} title="Fusa" vars={vars}>1/32</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 1i")} title="Semifusa" vars={vars}>1/64</RhythmBtn>
 
         <div className="w-px h-4 mx-1 shrink-0" style={{ background: vars["--border"] }} />
 
         <span className="font-semibold mr-1 tracking-wider" style={{ color: vars["--textMuted"], fontSize: 9 }}>PAUSAS</span>
-        <RhythmBtn onClick={() => insertAtCursor(" 0w")} title="Pausa de semibreve" vars={vars}>𝄻</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 0h")} title="Pausa de mínima" vars={vars}>𝄼</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 0q")} title="Pausa de semínima" vars={vars}>𝄽</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 0e")} title="Pausa de colcheia" vars={vars}>𝄾</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 0s")} title="Pausa de semicolcheia" vars={vars}>𝄿</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 0t")} title="Pausa de fusa" vars={vars}>𝅀</RhythmBtn>
-        <RhythmBtn onClick={() => insertAtCursor(" 0i")} title="Pausa de semifusa" vars={vars}>𝅁</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0w")} title="Pausa de semibreve" vars={vars}>P1</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0h")} title="Pausa de mínima" vars={vars}>P2</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0q")} title="Pausa de semínima" vars={vars}>P4</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0e")} title="Pausa de colcheia" vars={vars}>P8</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0s")} title="Pausa de semicolcheia" vars={vars}>P16</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0t")} title="Pausa de fusa" vars={vars}>P32</RhythmBtn>
+        <RhythmBtn onClick={() => insertAtCursor(" 0i")} title="Pausa de semifusa" vars={vars}>P64</RhythmBtn>
       </div>
 
       {showRecorder && (
