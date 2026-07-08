@@ -1,4 +1,5 @@
 import argparse
+from synemusic.style import status_ok, status_info, cabecalho
 
 
 def register(subparsers):
@@ -7,6 +8,9 @@ def register(subparsers):
 
 
 def run(args):
+    cabecalho()
+    print()
+
     pergunta = " ".join(args.pergunta) if args.pergunta else "Como posso ajudar?"
-    print(f"🎓 Maestro IA: {pergunta}")
-    print("   (implementação em breve)")
+    print(status_ok(f"Maestro IA: {pergunta}"))
+    print(status_info("(implementação em breve)"))

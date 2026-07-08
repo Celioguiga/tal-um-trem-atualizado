@@ -1,4 +1,5 @@
 import argparse
+from synemusic.style import status_ok, status_info, cabecalho
 
 
 def register(subparsers):
@@ -7,9 +8,14 @@ def register(subparsers):
 
 
 def run(args):
+    cabecalho()
+    print()
+
     if args.action == "play":
-        print("🎮 Iniciando O Pássaro Mágico…")
+        print(status_ok("Iniciando O Pássaro Mágico…"))
     elif args.action == "levels":
-        print("📊 Níveis: Explorador → Músico → Mestre → Virtuoso")
+        print(status_info("Níveis:"))
+        print("  Explorador → Músico → Mestre → Virtuoso")
     elif args.action == "heroes":
-        print("🦸 Heróis: LEO · ANA · JULIA · PEDRO · JOÃO")
+        print(status_info("Heróis:"))
+        print("  LEO · ANA · JULIA · PEDRO · JOÃO")

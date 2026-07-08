@@ -8,24 +8,42 @@
   --color-rng-sol: #0066ff;
   --color-rng-la: #8b5e00;
   --color-rng-si: #9b5fc0;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --color-gold: #e8a820;
+  --color-ink: #141009;
+  --color-ink2: #585349;
+  --color-ink3: #8b8578;
+  --color-ivory: #f5f2ea;
+  --color-parch: #a69b85;
+  --color-line: #2a241a;
+  --color-surface: #1a1610;
+  --color-surface2: #251f17;
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+::selection { background: var(--accentGlow, #0066ff40); color: #f5f2ea; }
+*:focus-visible { outline: 2px solid var(--accent, #0066ff); outline-offset: 2px; border-radius: 4px; }
 
-/* ── Selection ── */
-::selection { background: var(--primaryGlow, #0066ff40); color: #fff; }
-
-/* ── Focus ── */
-*:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
-
-/* ── Body ── */
+html { font-size: 18px; }
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
+  background: #1a1610;
+  color: #f5f2ea;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(245, 242, 234, 0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(245, 242, 234, 0.2); }
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f5f2ea;
+  -webkit-box-shadow: 0 0 0px 1000px #141009 inset;
+  transition: background-color 5000s ease-in-out 0s;
 }

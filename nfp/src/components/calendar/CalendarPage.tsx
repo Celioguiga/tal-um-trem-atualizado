@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { api, type Campaign } from "../../lib/api";
+import { useTheme } from "../../lib/theme";
 
 const WEEK = [
-  { dia: "Segunda", pilar: "Avaliação / Planejamento", canal: "Interno", cor: "bg-zinc-800" },
-  { dia: "Terça", pilar: "RNFG Decodifica", canal: "Instagram (Reels) + YouTube", cor: "bg-rng-si/20 text-rng-si" },
-  { dia: "Quarta", pilar: "Sala de Aula / Por Que Funciona", canal: "Instagram (Carrossel)", cor: "bg-zinc-800" },
-  { dia: "Quinta", pilar: "O Que É RNFG / Bastidores", canal: "Facebook + Newsletter", cor: "bg-zinc-800" },
-  { dia: "Sexta", pilar: "Lançamentos e Produtos", canal: "Instagram + Blog", cor: "bg-rng-fa/20 text-rng-fa" },
-  { dia: "Sábado", pilar: "Engajamento", canal: "Instagram Stories", cor: "bg-zinc-800" },
+  { dia: "Segunda", pilar: "Avaliação / Planejamento", canal: "Interno", cor: "surface" },
+  { dia: "Terça", pilar: "RNFG Decodifica", canal: "Instagram (Reels) + YouTube", cor: "si" },
+  { dia: "Quarta", pilar: "Sala de Aula / Por Que Funciona", canal: "Instagram (Carrossel)", cor: "surface" },
+  { dia: "Quinta", pilar: "O Que É RNFG / Bastidores", canal: "Facebook + Newsletter", cor: "surface" },
+  { dia: "Sexta", pilar: "Lançamentos e Produtos", canal: "Instagram + Blog", cor: "fa" },
+  { dia: "Sábado", pilar: "Engajamento", canal: "Instagram Stories", cor: "surface" },
 ];
 
 export function CalendarPage() {
+  const { vars } = useTheme();
   const [campanhas, setCampanhas] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -28,10 +30,10 @@ export function CalendarPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-8" style={{ color: vars["--text"] }}>
       <div>
         <h2 className="text-2xl font-bold">Calendário de Conteúdo</h2>
-        <p className="text-zinc-500 mt-1">
+        <p className="mt-1" style={{ color: vars["--textDim"] }}>
           Semana de {weekDates[0]?.toLocaleDateString("pt-BR")} — {weekDates[4]?.toLocaleDateString("pt-BR")}
         </p>
       </div>
@@ -43,36 +45,38 @@ export function CalendarPage() {
           return (
             <div
               key={day.dia}
-              className={`rounded-xl border ${
-                isToday ? "border-rng-sol/50 bg-rng-sol/5" : "border-zinc-800 bg-zinc-900"
-              } p-4`}
+              className="rounded-xl border p-4"
+              style={{
+                background: isToday ? vars["--surface2"] : vars["--surface"],
+                borderColor: isToday ? vars["--accent"] : vars["--border"],
+              }}
             >
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: vars["--textDim"] }}>
                   {day.dia.slice(0, 3)}
                 </span>
                 {date && (
-                  <span className={`text-xs ${isToday ? "text-rng-sol font-bold" : "text-zinc-600"}`}>
+                  <span className="text-xs" style={{ color: isToday ? vars["--accent"] : vars["--textMuted"] }}>
                     {date.getDate()}/{date.getMonth() + 1}
                   </span>
                 )}
               </div>
 
-              <div className={`text-sm font-medium mb-1 ${isToday ? "text-white" : "text-zinc-200"}`}>
+              <div className="text-sm font-medium mb-1" style={{ color: isToday ? vars["--text"] : vars["--textDim"] }}>
                 {day.pilar}
               </div>
 
-              <div className="text-xs text-zinc-500 mb-4">{day.canal}</div>
+              <div className="text-xs mb-4" style={{ color: vars["--textMuted"] }}>{day.canal}</div>
 
-              <div className="text-xs text-zinc-600">
+              <div className="text-xs" style={{ color: vars["--textMuted"] }}>
                 {day.dia === "Terça" && (
-                  <span className="text-rng-si">Série: RNFG Decodifica</span>
+                  <span style={{ color: vars["--accent"] }}>Série: RNFG Decodifica</span>
                 )}
                 {day.dia === "Sexta" && campanhas.length > 0 && (
                   <div>
-                    <div className="text-zinc-500 mb-1">Campanhas:</div>
+                    <div className="mb-1" style={{ color: vars["--textDim"] }}>Campanhas:</div>
                     {campanhas.slice(0, 2).map((c) => (
-                      <div key={c.name} className="text-zinc-400 truncate">
+                      <div key={c.name} className="truncate" style={{ color: vars["--textMuted"] }}>
                         • {c.name.replace(".md", "").replace(/_/g, " ")}
                       </div>
                     ))}
@@ -84,33 +88,35 @@ export function CalendarPage() {
         })}
       </div>
 
-      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
+      <div className="rounded-xl p-6" style={{ background: vars["--surface"], border: `1px solid ${vars["--border"]}` }}>
         <h3 className="font-semibold mb-4">Horário Fixo de Criação</h3>
         <div className="flex items-center gap-4">
-          <div className="bg-zinc-800 px-4 py-2 rounded-lg text-rng-sol font-bold">08:00 — 09:00</div>
-          <span className="text-sm text-zinc-400">Produção diária de conteúdo</span>
+          <div className="px-4 py-2 rounded-lg font-bold" style={{ background: vars["--surface2"], color: vars["--accent"] }}>
+            08:00 — 09:00
+          </div>
+          <span className="text-sm" style={{ color: vars["--textDim"] }}>Produção diária de conteúdo</span>
         </div>
       </div>
 
-      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
+      <div className="rounded-xl p-6" style={{ background: vars["--surface"], border: `1px solid ${vars["--border"]}` }}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold">Próximas Campanhas na Grade</h3>
         </div>
         {loading ? (
-          <p className="text-zinc-600 text-sm">Carregando...</p>
+          <p className="text-sm" style={{ color: vars["--textMuted"] }}>Carregando...</p>
         ) : campanhas.length === 0 ? (
-          <p className="text-zinc-600 text-sm">Nenhuma campanha ainda. Crie uma na aba Campanhas.</p>
+          <p className="text-sm" style={{ color: vars["--textMuted"] }}>Nenhuma campanha ainda. Crie uma na aba Campanhas.</p>
         ) : (
           <div className="space-y-2">
             {campanhas.map((c) => (
-              <div key={c.name} className="flex items-center justify-between bg-zinc-800/50 rounded-lg px-4 py-2.5">
+              <div key={c.name} className="flex items-center justify-between rounded-lg px-4 py-2.5" style={{ background: vars["--surface2"] }}>
                 <div>
-                  <div className="text-sm text-zinc-200">{c.name.replace(".md", "").replace(/_/g, " ")}</div>
-                  <div className="text-xs text-zinc-600">
+                  <div className="text-sm" style={{ color: vars["--textDim"] }}>{c.name.replace(".md", "").replace(/_/g, " ")}</div>
+                  <div className="text-xs" style={{ color: vars["--textMuted"] }}>
                     Criada em {new Date(c.mtime * 1000).toLocaleDateString("pt-BR")}
                   </div>
                 </div>
-                <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded">Pronta</span>
+                <span className="text-xs px-2 py-1 rounded" style={{ background: vars["--surface"], color: vars["--textMuted"] }}>Pronta</span>
               </div>
             ))}
           </div>

@@ -67,7 +67,7 @@ export function CampaignsPage() {
   if (loading) return <div style={{ color: vars["--textDim"] }}>Carregando...</div>;
 
   return (
-    <div className="space-y-6" style={{ color: vars["--text"] }}>
+    <div className="space-y-6 p-8" style={{ color: vars["--text"] }}>
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Campanhas</h2>
@@ -76,7 +76,7 @@ export function CampaignsPage() {
         <button
           onClick={() => setShowCreator(!showCreator)}
           className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          style={{ background: vars["--primary"], color: "#fff" }}
+          style={{ background: vars["--accent"], color: "#fff" }}
         >
           {showCreator ? "Fechar" : "+ Nova Campanha"}
         </button>
@@ -94,8 +94,8 @@ export function CampaignsPage() {
               key={c.name}
               className="group rounded-lg border transition-colors"
               style={{
-                background: selected === c.name ? vars["--primaryGlow"] : vars["--surface"],
-                borderColor: selected === c.name ? vars["--primary"] : vars["--border"],
+                background: selected === c.name ? vars["--accentGlow"] : vars["--surface"],
+                borderColor: selected === c.name ? vars["--accent"] : vars["--border"],
               }}
             >
               <button

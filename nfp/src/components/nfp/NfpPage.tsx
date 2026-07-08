@@ -2,7 +2,10 @@ import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useTheme } from "../../lib/theme";
 import { useAuth } from "../../lib/auth";
 import { RecorderPanel } from "./RecorderPanel";
+import { getVersions, getCurrentVersion } from "../../lib/versions";
 import { VoiceDictationPanel } from "./VoiceDictationPanel";
+import { MidiControllerPanel } from "./MidiControllerPanel";
+import { transposeCromus, transposeKey, TRANSPOSE_INTERVALS } from "../../lib/transpose";
 
 const DEFAULT_SYNTAXE = `1 2 3 4 5 6 7
 7 6 5 4 3 2 1
@@ -23,15 +26,7 @@ const EXEMPLOS_PRO: Record<string, string> = {
   "Com Ritornello": `||: 1 2 3 4 | 5 6 7 1' :||\n(CASA1) 7 6 5 4\n(CASA2) 1 2 3 1\nFIM`,
 };
 
-const FREE_MAX_COMPASSOS = 10;
 
-function contarCompassos(sintaxe: string): number {
-  const pipes = (sintaxe.match(/\|/g) || []).length;
-  if (pipes > 0) return pipes;
-  const virgulas = (sintaxe.match(/,/g) || []).length;
-  if (virgulas > 0) return Math.ceil(virgulas / 4);
-  return Math.ceil((sintaxe.match(/\S+/g) || []).length / 8);
-}
 
 type NotePos = { x: number; y: number };
 type PagePos = { notas: NotePos[]; w: number; h: number };
@@ -94,6 +89,9 @@ const VOICE_EMOJI: Record<string, string> = {
   "Piano": "🎹", "Harpa": "🪕", "Bateria": "🥁",
   "Soprano": "🎤", "Contralto": "🎤", "Tenor": "🎤", "Baixo": "🎤",
 };
+
+const INSTRUMENTOS = Object.keys(VOICE_EMOJI);
+const INSTRUMENTOS_KEYS = INSTRUMENTOS;
 
 const INSERTS = [
   { label: "notas", text: " 1 2 3 4 5 6 7" },
@@ -239,7 +237,11 @@ function TimelineBar({
 }
 
 /* ── Rich audio engine ── */
+let _masterVolume = 0.7;
+export function setMasterVolume(v: number) { _masterVolume = Math.max(0, Math.min(1, v)); }
+
 function scheduleNote(ctx: AudioContext, dest: GainNode, freq: number, t: number, dur: number) {
+  const vol = _masterVolume;
   const osc1 = ctx.createOscillator();
   osc1.type = "sine";
   osc1.frequency.value = freq;
@@ -258,9 +260,9 @@ function scheduleNote(ctx: AudioContext, dest: GainNode, freq: number, t: number
   lfo.start(t); lfo.stop(t + dur);
   const env = ctx.createGain();
   env.gain.setValueAtTime(0, t);
-  env.gain.linearRampToValueAtTime(1, t + 0.015);
-  env.gain.linearRampToValueAtTime(0.6, t + 0.065);
-  env.gain.setValueAtTime(0.6, t + dur * 0.7);
+  env.gain.linearRampToValueAtTime(1 * vol, t + 0.015);
+  env.gain.linearRampToValueAtTime(0.6 * vol, t + 0.065);
+  env.gain.setValueAtTime(0.6 * vol, t + dur * 0.7);
   env.gain.linearRampToValueAtTime(0, t + dur);
   const pan = ctx.createStereoPanner();
   pan.pan.value = (Math.random() - 0.5) * 0.3;
@@ -302,57 +304,72 @@ export function NfpPage() {
   const [compositor, setCompositor] = useState("");
   const [compasso, setCompasso] = useState("4/4");
   const [tonalidade, setTonalidade] = useState("c \\major");
+  const [clef, setClef] = useState("G_2");
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [activePage, setActivePage] = useState(0);
   const [showLy, setShowLy] = useState(false);
-  const compassos = contarCompassos(sintaxe);
-  const excedeuLimite = isFree && compassos > FREE_MAX_COMPASSOS;
-
+  const [renderCount, setRenderCount] = useState(0);
   /* ── Audio state ── */
   const [playing, setPlaying] = useState(false);
   const [paused, setPaused] = useState(false);
   const [currentIdx, setCurrentIdx] = useState(-1);
+  const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
   const audioRef = useRef<{ ctx: AudioContext } | null>(null);
   const rafRef = useRef(0);
   const startTimeRef = useRef(0);
   const lastIdxRef = useRef(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pageRangesRef = useRef<number[]>([]);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const [showRecorder, setShowRecorder] = useState(false);
   const [showDictation, setShowDictation] = useState(false);
+  const [showMidiController, setShowMidiController] = useState(false);
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem("nfp_volume");
+    return saved ? parseFloat(saved) : 0.7;
+  });
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioWavUrl, setAudioWavUrl] = useState<string | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    setMasterVolume(volume);
+    localStorage.setItem("nfp_volume", String(volume));
+  }, [volume]);
 
   const voices = parseVoices(sintaxe);
   const orquestral = voices.length > 0;
 
   const handleRealAudio = useCallback(async () => {
     if (audioWavUrl) {
-      audioElRef.current?.play();
+      audioElRef.current?.play().catch(e => console.warn("Playback:", e));
       return;
     }
     setAudioLoading(true);
     try {
-      const res = await fetch("/api/nfp/render/audio", {
+      const res = await fetch("http://localhost:4242/render/audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, titulo, compasso, tonalidade }),
+        body: JSON.stringify({ sintaxe, titulo, compasso, tonalidade, clef }),
       });
       const data = await res.json();
       if (data.ok && data.wav) {
-        const url = `data:audio/wav;base64,${data.wav}`;
+        const binary = atob(data.wav);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "audio/wav" });
+        const url = URL.createObjectURL(blob);
         setAudioWavUrl(url);
         const audio = new Audio(url);
         audioElRef.current = audio;
-        audio.play();
+        await audio.play();
       } else {
         alert(data.erro || "Áudio indisponível");
       }
-    } catch { alert("Erro ao gerar áudio"); }
+    } catch (e) { alert("Erro ao gerar áudio: " + (e as Error).message); }
     setAudioLoading(false);
-  }, [sintaxe, titulo, compasso, audioWavUrl]);
+  }, [sintaxe, titulo, compasso, tonalidade, clef, audioWavUrl]);
 
   const notes = parseTimeline(sintaxe);
 
@@ -378,7 +395,7 @@ export function NfpPage() {
     cancelAnimationFrame(rafRef.current);
     if (audioRef.current) { try { audioRef.current.ctx.close(); } catch {} audioRef.current = null; }
     lastIdxRef.current = -1;
-    setPlaying(false); setPaused(false); setCurrentIdx(-1);
+    setPlaying(false); setPaused(false); setCurrentIdx(-1); setCurrentPos(null);
   }, []);
 
   /* ── rAF sync ── */
@@ -391,6 +408,9 @@ export function NfpPage() {
       setCurrentIdx(idx);
       const page = pageFromIdx(idx);
       if (page !== activePage) setActivePage(page);
+      // Highlight na partitura
+      const pos = resultRef.current?.positions?.[page]?.notas?.[idx];
+      if (pos) setCurrentPos(pos);
       const n = notes[idx];
       if (n && textareaRef.current) {
         const ta = textareaRef.current;
@@ -405,24 +425,27 @@ export function NfpPage() {
   }, [notes, stopAudio, activePage]);
 
   /* ── Play ── */
-  const handlePlay = useCallback(() => {
+  const handlePlay = useCallback(async () => {
     if (paused && audioRef.current?.ctx.state === "suspended") {
-      audioRef.current.ctx.resume(); setPaused(false);
+      await audioRef.current.ctx.resume(); setPaused(false);
       rafRef.current = requestAnimationFrame(syncLoop);
       return;
     }
     stopAudio();
     if (!notes.length) return;
-    const ctx = new AudioContext();
-    const dry = createReverb(ctx);
-    dry.connect(ctx.destination);
-    preSchedule(ctx, dry, notes, BEAT_DUR);
-    startTimeRef.current = ctx.currentTime;
-    lastIdxRef.current = -1;
-    audioRef.current = { ctx };
-    setPlaying(true); setPaused(false); setCurrentIdx(0);
-    setActivePage(0);
-    rafRef.current = requestAnimationFrame(syncLoop);
+    try {
+      const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
+      const dry = createReverb(ctx);
+      dry.connect(ctx.destination);
+      preSchedule(ctx, dry, notes, BEAT_DUR);
+      startTimeRef.current = ctx.currentTime;
+      lastIdxRef.current = -1;
+      audioRef.current = { ctx };
+      setPlaying(true); setPaused(false); setCurrentIdx(0);
+      setActivePage(0);
+      rafRef.current = requestAnimationFrame(syncLoop);
+    } catch (e) { console.warn("Playback error:", e); }
   }, [notes, syncLoop, stopAudio, paused]);
 
   /* ── Melody Recorder ── */
@@ -448,7 +471,10 @@ export function NfpPage() {
       setPlaying(true); setPaused(false);
     }
     setCurrentIdx(idx);
-    setActivePage(pageFromIdx(idx));
+    const page = pageFromIdx(idx);
+    setActivePage(page);
+    const ppos = resultRef.current?.positions?.[page]?.notas?.[idx];
+    if (ppos) setCurrentPos(ppos);
     const n = notes[idx];
     if (n && textareaRef.current) {
       textareaRef.current.setSelectionRange(n.charStart, n.charEnd);
@@ -467,12 +493,22 @@ export function NfpPage() {
       const res = await fetch("/api/nfp/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, modo, titulo, compasso, tonalidade }),
+        body: JSON.stringify({ sintaxe, modo, titulo, compasso, tonalidade, clef }),
       });
-      setResult(await res.json());
+      const data = await res.json();
+      setResult(data);
+      setRenderCount((c) => c + 1);
     } catch { setResult({ ok: false, log: "Erro de conexão." }); }
     setRendering(false);
-  }, [sintaxe, modo, titulo, compasso, tonalidade]);
+  }, [sintaxe, modo, titulo, compasso, tonalidade, clef]);
+
+  /* ── Auto-render on changes (debounced) ── */
+  const autoRenderRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (autoRenderRef.current) clearTimeout(autoRenderRef.current);
+    autoRenderRef.current = setTimeout(() => { handleRender(); }, 600);
+    return () => { if (autoRenderRef.current) clearTimeout(autoRenderRef.current); };
+  }, [sintaxe, modo, compasso, tonalidade, clef]);
 
   const insertAtCursor = (text: string) => {
     const el = textareaRef.current;
@@ -483,7 +519,7 @@ export function NfpPage() {
     requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + text.length; el.focus(); });
   };
 
-  const previewUrl = result?.pages?.[activePage] ? `data:image/png;base64,${result.pages[activePage]}` : null;
+  const previewUrl = result?.pages?.[activePage] ? `data:image/png;base64,${result.pages[activePage]}#t=${Date.now()}` : null;
 
   /* ── Save / Export ── */
   const handleSave = useCallback(() => {
@@ -522,13 +558,17 @@ export function NfpPage() {
 
   const handleExportMidi = useCallback(async () => {
     try {
-      const res = await fetch("/api/nfp/export/midi", {
+      const res = await fetch("http://localhost:4242/export/midi", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, titulo, compositor, compasso, tonalidade }),
+        body: JSON.stringify({ sintaxe, titulo, compositor, compasso, tonalidade, clef }),
       });
-      if (!res.ok) throw new Error("MIDI export failed");
-      const blob = await res.blob();
+      const data = await res.json();
+      if (!data.ok || !data.midi) throw new Error(data.erro || "MIDI export failed");
+      const byteStr = atob(data.midi);
+      const ab = new Uint8Array(byteStr.length);
+      for (let i = 0; i < byteStr.length; i++) ab[i] = byteStr.charCodeAt(i);
+      const blob = new Blob([ab], { type: "audio/midi" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -540,13 +580,17 @@ export function NfpPage() {
 
   const handleExportWav = useCallback(async () => {
     try {
-      const res = await fetch("/api/nfp/export/wav", {
+      const res = await fetch("http://localhost:4242/export/wav", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sintaxe, titulo, compositor, compasso, tonalidade }),
+        body: JSON.stringify({ sintaxe, titulo, compositor, compasso, tonalidade, clef }),
       });
-      if (!res.ok) throw new Error("WAV export failed");
-      const blob = await res.blob();
+      const data = await res.json();
+      if (!data.ok || !data.wav) throw new Error(data.erro || "WAV export failed");
+      const byteStr = atob(data.wav);
+      const ab = new Uint8Array(byteStr.length);
+      for (let i = 0; i < byteStr.length; i++) ab[i] = byteStr.charCodeAt(i);
+      const blob = new Blob([ab], { type: "audio/wav" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -592,6 +636,16 @@ export function NfpPage() {
           >NFP</span>
         </div>
 
+        <select value={getCurrentVersion().label}
+          onChange={(e) => { const target = e.target.value; for (const v of getVersions()) { if (v.label === target) { window.location.href = v.url; return; } } }}
+          className="px-1.5 py-1 rounded border text-[10px]"
+          style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"], cursor: "pointer" }}
+        >
+          {getVersions().map((v) => (
+            <option key={v.label} value={v.label}>{v.label}</option>
+          ))}
+        </select>
+
         <div className="flex items-center gap-1 px-2 py-1 rounded"
           style={{ background: vars["--bg"], border: `1px solid ${vars["--border"]}` }}
         >
@@ -616,6 +670,14 @@ export function NfpPage() {
             className="px-3 py-1 font-bold rounded transition-all text-base"
             style={{ background: vars["--surface2"], color: "#C0001A", opacity: !playing ? 0.3 : 1 }}
           >■</button>
+          <button onClick={() => setShowMidiController((p) => !p)}
+            className="px-3 py-1 font-bold rounded transition-all text-base"
+            style={{
+              background: showMidiController ? vars["--accent"] : vars["--surface2"],
+              color: showMidiController ? "#fff" : "#8B5E00",
+            }}
+            title="Controlador MIDI"
+          >🎹</button>
           <button onClick={() => setShowRecorder((p) => !p)}
             className="px-3 py-1 font-bold rounded transition-all text-base"
             style={{
@@ -641,15 +703,32 @@ export function NfpPage() {
         </div>
 
         {orquestral && (
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px]"
-            style={{ background: "#0066FF10", color: "#0066FF", border: "1px solid #0066FF20" }}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded text-[11px]"
+            style={{ background: "#0066FF10", border: "1px solid #0066FF25" }}
           >
+            <span className="font-semibold text-[10px] tracking-wider px-1.5 py-0.5 rounded shrink-0"
+              style={{ background: "#0066FF", color: "#fff" }}
+            >{voices.length} {voices.length === 1 ? "voz" : "vozes"}</span>
             {voices.map((v, i) => (
-              <span key={i} className="flex items-center gap-0.5">
-                {i > 0 && <span style={{ color: "#0066FF40" }}>+</span>}
-                {VOICE_EMOJI[v] || "🎵"} {v}
+              <span key={i} className="flex items-center gap-1 px-1.5 py-0.5 rounded whitespace-nowrap"
+                style={{ background: "#ffffff08", border: "1px solid #ffffff12" }}
+              >
+                {VOICE_EMOJI[v] || "🎵"}
+                <span style={{ color: vars["--text"] }}>{v}</span>
               </span>
             ))}
+            <button
+              onClick={() => {
+                setSintaxe(prev => prev + `\n--- ${INSTRUMENTOS[0]}`);
+                setTimeout(() => {
+                  const ta = textareaRef.current;
+                  if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
+                }, 0);
+              }}
+              className="flex items-center justify-center w-5 h-5 rounded font-bold leading-none transition-colors hover:brightness-125 shrink-0"
+              style={{ background: vars["--surface2"], color: vars["--textMuted"], fontSize: 15, border: `1px solid ${vars["--border"]}` }}
+              title="Adicionar voz"
+            >+</button>
           </div>
         )}
 
@@ -662,6 +741,20 @@ export function NfpPage() {
           <option value="REAL">REAL</option>
           <option value="FORMA">FORMA</option>
           <option value="STAFFLESS">STAFFLESS</option>
+        </select>
+
+        <select value={clef} onChange={(e) => setClef(e.target.value)}
+          className="px-2 py-1 rounded border text-[11px] w-44"
+          style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
+        >
+          <option value="G_2">Clave de Sol (linha 2)</option>
+          <option value="G_1">Clave de Sol (linha 1)</option>
+          <option value="F_4">Clave de Fá (linha 4)</option>
+          <option value="F_3">Clave de Fá (linha 3)</option>
+          <option value="C_1">Clave de Dó (linha 1)</option>
+          <option value="C_2">Clave de Dó (linha 2)</option>
+          <option value="C_3">Clave de Dó (linha 3)</option>
+          <option value="C_4">Clave de Dó (linha 4)</option>
         </select>
 
         <input value={titulo} onChange={(e) => setTitulo(e.target.value)}
@@ -735,16 +828,11 @@ export function NfpPage() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-2">
-          {isFree && (
-            <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#F0730020", color: "#F07300" }}>
-              {compassos}/{FREE_MAX_COMPASSOS}
-            </span>
-          )}
-          <button onClick={handleRender} disabled={rendering || !sintaxe.trim() || excedeuLimite}
+          <button onClick={handleRender} disabled={rendering || !sintaxe.trim()}
             className="px-4 py-1 text-sm font-semibold rounded disabled:opacity-40 transition-colors"
-            style={{ background: excedeuLimite ? "#C0001A" : vars["--accent"], color: "#fff" }}
+            style={{ background: vars["--accent"], color: "#fff" }}
           >
-            {excedeuLimite ? "Limite" : rendering ? "…" : "Renderizar"}
+            {rendering ? "…" : "Renderizar"}
           </button>
         </div>
       </div>
@@ -798,6 +886,48 @@ export function NfpPage() {
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
+
+        <div className="w-px h-5" style={{ background: vars["--border"] }} />
+
+        <span className="text-[10px] font-semibold tracking-wider mr-0.5" style={{ color: vars["--textMuted"] }}>TRANSPOSICAO</span>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => {
+              setSintaxe((prev) => transposeCromus(prev, -1));
+              setTonalidade((prev) => transposeKey(prev, -1));
+            }}
+            className="px-2 py-1 text-sm font-bold rounded"
+            style={{ background: vars["--bg"], color: vars["--text"], border: `1px solid ${vars["--border"]}` }}
+            title="Transpor -1 grau"
+          >↓</button>
+          <button
+            onClick={() => {
+              setSintaxe((prev) => transposeCromus(prev, 1));
+              setTonalidade((prev) => transposeKey(prev, 1));
+            }}
+            className="px-2 py-1 text-sm font-bold rounded"
+            style={{ background: vars["--bg"], color: vars["--text"], border: `1px solid ${vars["--border"]}` }}
+            title="Transpor +1 grau"
+          >↑</button>
+          <select
+            onChange={(e) => {
+              const v = parseInt(e.target.value);
+              if (!isNaN(v)) {
+                setSintaxe((prev) => transposeCromus(prev, v));
+                setTonalidade((prev) => transposeKey(prev, v));
+              }
+              e.target.value = "";
+            }}
+            className="px-1.5 py-1 rounded border text-[11px]"
+            style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
+            defaultValue=""
+          >
+            <option value="" disabled>Intervalo...</option>
+            {TRANSPOSE_INTERVALS.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* ── Barra de inserção rítmica ── */}
@@ -850,6 +980,15 @@ export function NfpPage() {
         <RhythmBtn onClick={() => insertAtCursor(" 0i")} title="Pausa de semifusa" vars={vars}>P64</RhythmBtn>
       </div>
 
+      {showMidiController && (
+        <MidiControllerPanel
+          onInsert={handleRecorderInsert}
+          vars={vars}
+          volume={volume}
+          onVolumeChange={setVolume}
+        />
+      )}
+
       {showRecorder && (
         <RecorderPanel
           onInsert={handleRecorderInsert}
@@ -874,6 +1013,59 @@ export function NfpPage() {
       {/* ── Editor + Preview ── */}
       <div className="flex-1 flex min-h-0">
         <div className="flex flex-col w-1/2 min-w-0" style={{ borderRight: `1px solid ${vars["--border"]}` }}>
+          <div className="flex items-center justify-between px-3 py-1 shrink-0 text-[11px]"
+            style={{ background: vars["--surface"], borderBottom: `1px solid ${vars["--border"]}` }}
+          >
+            <span style={{ color: vars["--textMuted"], fontWeight: 600, letterSpacing: "0.04em" }}>SINTAXE</span>
+            {!orquestral && (
+              <span style={{ color: vars["--textMuted"], opacity: 0.5 }}>
+                <code style={{ background: vars["--surface2"], padding: "0 3px", borderRadius: 2 }}>--- Nome</code> = nova voz
+              </span>
+            )}
+            {orquestral && (
+              <span style={{ color: "#0066FF", opacity: 0.7 }}>
+                {voices.length} {voices.length === 1 ? "voz" : "vozes"} orquestrais
+              </span>
+            )}
+          </div>
+          {orquestral && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 shrink-0 overflow-x-auto"
+              style={{ background: vars["--surface"], borderBottom: `1px solid ${vars["--border"]}` }}
+            >
+              {voices.map((v, i) => (
+                <div key={i} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] whitespace-nowrap"
+                  style={{ background: "#0066FF08", border: "1px solid #0066FF20" }}
+                >
+                  <span>{VOICE_EMOJI[v] || "🎵"}</span>
+                  <select value={v}
+                    onChange={(e) => {
+                      const lines = sintaxe.split("\n");
+                      let found = 0;
+                      for (let j = 0; j < lines.length; j++) {
+                        const m = lines[j].match(/^---\s*(.+?)(?::|$)/);
+                        if (m) {
+                          if (found === i) { lines[j] = lines[j].replace(m[1], e.target.value); break; }
+                          found++;
+                        }
+                      }
+                      setSintaxe(lines.join("\n"));
+                    }}
+                    className="px-1 py-0 rounded border-none text-[11px] bg-transparent"
+                    style={{ color: vars["--text"] }}
+                  >
+                    {INSTRUMENTOS.map((inst) => (
+                      <option key={inst} value={inst}>{inst}</option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] opacity-50">{voices.length}ª voz</span>
+                </div>
+              ))}
+              <button onClick={() => setSintaxe(prev => prev + `\n--- ${INSTRUMENTOS[0]}`)}
+                className="px-2 py-1 rounded text-[11px] font-medium shrink-0"
+                style={{ background: vars["--surface2"], color: vars["--accent"], border: `1px solid ${vars["--border"]}` }}
+              >+ voz</button>
+            </div>
+          )}
           <textarea ref={textareaRef} value={sintaxe} onChange={(e) => setSintaxe(e.target.value)}
             className="flex-1 p-4 text-base font-mono resize-none focus:outline-none border-0"
             style={{ background: vars["--bg"], color: vars["--text"] }}
@@ -950,10 +1142,31 @@ export function NfpPage() {
                     style={{ background: vars["--surface"], color: vars["--text"] }}
                   >{result.ly}</pre>
                 ) : (
-                  <img src={previewUrl} alt="Partitura"
-                    className="max-w-full shadow-lg"
-                    style={{ border: "1px solid #333" }}
-                  />
+                  <div className="relative inline-block">
+                    <img key={`page-${activePage}-${renderCount}`} src={previewUrl} alt="Partitura"
+                      className="max-w-full shadow-lg"
+                      style={{ border: "1px solid #333" }}
+                      ref={(el) => {
+                        // Guarda ref para calcular escala
+                        if (el) imgRef.current = el;
+                      }}
+                    />
+                    {currentPos && result?.positions?.[activePage] && (
+                      <div style={{
+                        position: "absolute",
+                        left: `${(currentPos.x / (result.positions[activePage].w || 1)) * 100}%`,
+                        top: `${(currentPos.y / (result.positions[activePage].h || 1)) * 100}%`,
+                        width: 8, height: 8,
+                        borderRadius: "50%",
+                        background: "rgba(255,255,0,0.8)",
+                        boxShadow: "0 0 12px rgba(255,255,0,0.6)",
+                        transform: "translate(-50%, -50%)",
+                        pointerEvents: "none",
+                        transition: "left 0.08s linear, top 0.08s linear",
+                        zIndex: 10,
+                      }} />
+                    )}
+                  </div>
                 )}
               </div>
 

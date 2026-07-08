@@ -1,17 +1,21 @@
 import argparse
 import sys
+from synemusic.style import ajuda
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="synemusic",
-        description="CLI unificada do Ecossistema Synemusic",
+        description="CLI Unificada do Ecossistema Synemusic",
+        usage="synemusic <comando> [<args>]",
+        add_help=False,
     )
     parser.add_argument(
         "-v", "--version", action="version", version="synemusic 0.1.0 (Prompt Mestre v10.6)"
     )
+    parser.add_argument("--help", action="store_true", help="Mostra esta ajuda")
 
-    subparsers = parser.add_subparsers(dest="command", help="Subcomandos")
+    subparsers = parser.add_subparsers(dest="command")
 
     from synemusic.commands.studio import register as studio_cmd
     from synemusic.commands.nfp import register as nfp_cmd
@@ -24,6 +28,8 @@ def main():
     from synemusic.commands.cert import register as cert_cmd
     from synemusic.commands.config import register as config_cmd
     from synemusic.commands.tab import register as tab_cmd
+    from synemusic.commands.realtab import register as realtab_cmd
+    from synemusic.commands.harmonia import register as harmonia_cmd
 
     studio_cmd(subparsers)
     nfp_cmd(subparsers)
@@ -36,12 +42,14 @@ def main():
     cert_cmd(subparsers)
     config_cmd(subparsers)
     tab_cmd(subparsers)
+    realtab_cmd(subparsers)
+    harmonia_cmd(subparsers)
 
     args = parser.parse_args()
 
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
+    if args.help or not args.command:
+        ajuda()
+        sys.exit(0 if args.help else 1)
 
     dispatch(args)
 
@@ -59,6 +67,8 @@ def dispatch(args):
         "cert": "synemusic.commands.cert",
         "config": "synemusic.commands.config",
         "tab": "synemusic.commands.tab",
+        "realtab": "synemusic.commands.realtab",
+        "harmonia": "synemusic.commands.harmonia",
     }
     mod = __import__(module[args.command], fromlist=["run"])
     mod.run(args)

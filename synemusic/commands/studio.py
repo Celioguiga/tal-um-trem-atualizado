@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+from synemusic.style import status_ok, status_erro, status_info, cabecalho
 
 
 def register(subparsers):
@@ -13,14 +14,17 @@ def run(args):
     home = os.path.expanduser("~")
     studio_py = os.path.join(home, "cromus_studio.py")
 
+    cabecalho()
+    print()
+
     if args.action == "stop":
         subprocess.run(["pkill", "-f", "cromus_studio"], check=False)
-        print("✗ Cromus Studio parado.")
+        print(status_erro("Cromus Studio parado."))
         return
 
     if args.action == "restart":
         subprocess.run(["pkill", "-f", "cromus_studio"], check=False)
-        print("↻ Reiniciando…")
+        print(status_info("Reiniciando…"))
 
     if args.action in ("start", "restart"):
         env = os.environ.copy()
@@ -32,4 +36,4 @@ def run(args):
             stderr=subprocess.DEVNULL,
             env=env,
         )
-        print(f"✓ Cromus Studio rodando em http://localhost:{args.port} (PID {proc.pid})")
+        print(status_ok(f"Cromus Studio rodando em http://localhost:{args.port} (PID {proc.pid})"))

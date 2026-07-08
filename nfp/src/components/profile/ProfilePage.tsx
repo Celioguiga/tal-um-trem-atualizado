@@ -4,7 +4,7 @@ import { useAuth } from "../../lib/auth";
 import { LGPD_TERMS, LGPD_VERSION } from "../../lib/lgpd";
 
 export function ProfilePage() {
-  const { user } = useAuth();
+  const { user, togglePlan } = useAuth();
 
   const [consentEnabled, setConsentEnabled] = useState({
     comunicacao_marketing: true,
@@ -38,6 +38,30 @@ export function ProfilePage() {
               <span className="text-zinc-500">Plano</span>
               <p className="text-zinc-200 capitalize">{user?.plan}</p>
             </div>
+            {user?.plan === "free" && (
+              <div className="pt-2">
+                <a href="#" onClick={(e) => { e.preventDefault(); togglePlan(); }}
+                  className="inline-block text-xs px-3 py-1.5 rounded font-medium transition-colors"
+                  style={{ background: "#0066FF20", color: "#0066FF" }}
+                >
+                  ⚡ Ativar Essencial (Hotmart — em breve)
+                </a>
+                <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
+                  Plano Essencial: R$97/mês · compassos ilimitados · todas as cantigas ·
+                  exportação MIDI/WAV · prioridade em novas features.
+                </p>
+              </div>
+            )}
+            {user?.plan === "essencial" && (
+              <div className="pt-2">
+                <a href="#" onClick={(e) => { e.preventDefault(); togglePlan(); }}
+                  className="inline-block text-xs px-3 py-1.5 rounded font-medium transition-colors"
+                  style={{ background: "#00B05020", color: "#00B050" }}
+                >
+                  🔄 Voltar para Free (dev toggle)
+                </a>
+              </div>
+            )}
           </div>
         </div>
 

@@ -91,7 +91,21 @@ _INSTRUMENTOS = {
     "Voz":          {"clef": "treble", "midi": 54, "abrev": "Voz"},
 }
 
-_CLEF_LILY = {"treble":"treble", "alto":"alto", "bass":"bass", "percussion":"percussion"}
+_CLEF_LILY = {"treble":"treble", "alto":"alto", "bass":"bass", "percussion":"percussion",
+              "G_1":"G_1", "G_2":"G_2",
+              "F_4":"F_4", "F_3":"F_3",
+              "C_1":"C_1", "C_2":"C_2", "C_3":"C_3", "C_4":"C_4"}
+
+_CLEF_CHOICES = [
+    ("Clave de Sol (linha 2)", "G_2"),
+    ("Clave de Sol (linha 1)", "G_1"),
+    ("Clave de Fá (linha 4)", "F_4"),
+    ("Clave de Fá (linha 3)", "F_3"),
+    ("Clave de Dó (linha 1)", "C_1"),
+    ("Clave de Dó (linha 2)", "C_2"),
+    ("Clave de Dó (linha 3)", "C_3"),
+    ("Clave de Dó (linha 4)", "C_4"),
+]
 
 
 def _is_orquestral(sintaxe):
@@ -158,8 +172,9 @@ def _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=80, tonalidade="c \
     )
 
 
-def _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major"):
+def _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major", clef="G_2"):
     """Gera bloco \\score com \\midi para orquestral ou monofônico."""
+    clef_lily = _CLEF_LILY.get(clef, "treble")
     orquestral = _is_orquestral(sintaxe)
     if orquestral:
         raw = _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
@@ -167,9 +182,9 @@ def _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=80, tonalidade=
         raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
         modoe = "REAL" if modo == "STAFFLESS" else modo
         raw = (
-            f'    \\new Staff \\with {{ midiInstrument = #40 }}\n'
+            f'    \\new Staff \\with {{ midiInstrument = #"violin" }}\n'
             f'    {{\n'
-            f'      \\clef treble\n'
+            f'      \\clef {clef_lily}\n'
             f'      {raw.strip()}\n'
             f'    }}\n'
         )
@@ -198,6 +213,8 @@ def _finger_to_ly(finger_str):
             out += '_' + p.lower()
     return out
 
+_DUR_MAP_PARSE = {'w': '1', 'h': '2', 'q': '4', 'e': '8', 's': '16', 't': '32', 'i': '64'}
+
 def _parse_nota(tok):
     import re as _re
     finger = ''
@@ -208,6 +225,16 @@ def _parse_nota(tok):
     ast = len(tok) - len(tok.rstrip('*'))
     parcelas = ast if ast > 0 else 1
     corpo = tok.rstrip('*')
+    dur_override = None
+    m_dur = _re.match(r"^(.+?)([whqestin.]+)$", corpo)
+    if m_dur:
+        corpo = m_dur.group(1)
+        dur_str = m_dur.group(2).rstrip('.')
+        if dur_str in _DUR_MAP_PARSE:
+            dur_override = _DUR_MAP_PARSE[dur_str]
+            dots = m_dur.group(2).count('.')
+            if dots:
+                dur_override += '.' * dots
     oitava = 0
     while corpo.startswith("'"):
         oitava -= 1; corpo = corpo[1:]
@@ -215,10 +242,10 @@ def _parse_nota(tok):
         oitava += 1; corpo = corpo[:-1]
     corpo = corpo.lstrip('+')
     if corpo in ('-','0'):
-        return ('r', parcelas, finger)
+        return ('r', parcelas, finger, dur_override)
     m = _re.match(r"^([0-7])([#b]?)$", corpo)
     if not m:
-        return (None, parcelas, finger)
+        return (None, parcelas, finger, dur_override)
     grau = int(m.group(1)); acc = m.group(2)
     pitch = _LY_PITCH[grau]
     if oitava > 0:
@@ -230,7 +257,7 @@ def _parse_nota(tok):
         pitch = pitch[0] + 'is' + pitch[1:]
     elif acc == 'b':
         pitch = pitch[0] + 'es' + pitch[1:]
-    return (pitch, parcelas, finger)
+    return (pitch, parcelas, finger, dur_override)
 
 def _eh_tuplet_total(total):
     return total not in (1,2,4,8,16,32)
@@ -285,9 +312,9 @@ def _converter_tempo(grupo):
             if is_tie:
                 tie_next = True
                 continue
-            p, _, finger = _parse_nota(tk.replace('@TIE@',''))
+            p, _, finger, dur = _parse_nota(tk.replace('@TIE@',''))
             if p:
-                nly = p + '8' + finger
+                nly = p + (dur or '8') + finger
                 if tie_next and corpo:
                     corpo[-1] += '~'
                 elif tie_next:
@@ -314,30 +341,35 @@ def _converter_tempo(grupo):
                 tie_pending = False
     clean_g = ' '.join(clean_raw)
 
-    tokens = _re.findall(r"[0-7]\{[^}]*\}[''#b]*\**|[0-7]'*\*+|-\*+|[0-7]'*|-", clean_g.replace(' ',''))
+    tokens = _re.findall(r"[0-7]\{[^}]*\}[''#b]*\**|[0-7]'*[*whqestin]+|-\*+|[0-7]'*|-|0[whqestin]+", clean_g.replace(' ',''))
     notas = []
     for t in tokens:
         if '*' in t:
             base = t.rstrip('*'); ast = len(t)-len(base)
-            notas.append((base, ast))
+            notas.append((base, ast, None))
+        elif any(c in t for c in 'whqestin'):
+            notas.append((t, 0, None))  # dur_override será extraído pelo parse
         else:
-            notas.append((t, 1))
-    total = sum(p for _,p in notas)
+            notas.append((t, 1, None))
+    total = sum(p or 1 for _,p,_ in notas)
     if total == 0:
         return ''
-    tuplet = _eh_tuplet_total(total)
+    has_explicit = any('w' in t or 'h' in t or 'q' in t or 'e' in t or 's' in t or 't' in t or 'i' in t for t,_,_ in notas)
+    tuplet = _eh_tuplet_total(total) and not has_explicit
     POW2 = {4.0:'1',2.0:'2',1.0:'4',0.5:'8',0.25:'16',0.125:'32',
             3.0:'2.',1.5:'4.',0.75:'8.',0.375:'16.'}
     corpo = []
-    for idx, (base, parcelas) in enumerate(notas):
-        pitch, _, finger = _parse_nota(base)
+    for idx, (base, parcelas, _) in enumerate(notas):
+        pitch, _, finger, dur_override = _parse_nota(base)
         if not pitch:
             continue
-        if tuplet:
+        if dur_override:
+            nly = pitch + dur_override + finger
+        elif tuplet:
             unidade_base = _UNIDADE_TUPLET.get(total,16)
-            nly = pitch + _dur_de_unidades(parcelas, unidade_base) + finger
+            nly = pitch + _dur_de_unidades(parcelas or 1, unidade_base) + finger
         else:
-            frac = (parcelas/total)*1.0
+            frac = (parcelas/total)*1.0 if parcelas else (1/total)*1.0
             nly = pitch + POW2.get(frac,'16') + finger
         if idx in tie_idx:
             nly += '~'
@@ -420,8 +452,9 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
         '  ' + corpo + '\n'
     )
 
-def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major"):
+def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major", clef="G_2"):
     import tempfile, os
+    clef_lily = _CLEF_LILY.get(clef, "treble")
     # Rota orquestral: gera LilyPond completo diretamente
     if _is_orquestral(sintaxe):
         ly = _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=andamento, tonalidade=tonalidade)
@@ -438,7 +471,10 @@ def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="
         saida_ly = tmp.name
     try:
         fn(cantiga, saida_ly, modo)
-        return Path(saida_ly).read_text(encoding="utf-8")
+        ly_text = Path(saida_ly).read_text(encoding="utf-8")
+        # Substitui a clave padrão do pipeline pela selecionada
+        ly_text = re.sub(r'\\clef\s+treble', r'\\clef ' + clef_lily, ly_text)
+        return ly_text
     finally:
         try: os.unlink(saida_ly)
         except: pass
@@ -608,11 +644,11 @@ def compilar_tab(sintaxe, titulo, compasso, compositor="Synemusic"):
     return {"ok": True, "pages": imgs, "log": log.strip(), "ly": conteudo_ly, "pdf": pdf_data}
 
 # ─────────────────────────── COMPILAÇÃO ─────────────────────────────────────
-def compilar(sintaxe, modo, titulo, compasso, tonalidade="c \\major"):
+def compilar(sintaxe, modo, titulo, compasso, tonalidade="c \\major", clef="G_2"):
     WORK_DIR.mkdir(exist_ok=True)
     for f in WORK_DIR.glob("preview*"): f.unlink(missing_ok=True)
     orquestral_ = _is_orquestral(sintaxe)
-    conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso, tonalidade=tonalidade)
+    conteudo_ly = gerar_arquivo_ly(sintaxe, modo, titulo, compasso, tonalidade=tonalidade, clef=clef)
     (WORK_DIR / "preview.ly").write_text(conteudo_ly, encoding="utf-8")
     if HEADER_FILE.exists() and not orquestral_:
         shutil.copy(HEADER_FILE, WORK_DIR / HEADER_FILE.name)
@@ -662,25 +698,42 @@ def compilar(sintaxe, modo, titulo, compasso, tonalidade="c \\major"):
 # Gera WAV via LilyPond → MIDI → FluidSynth com SoundFont real
 
 _SOUNDFONT_PATHS = [
-    os.path.expanduser("~/Library/Audio/Sounds/MuseScore_General.sf3"),
     os.path.expanduser("~/Library/Audio/Sounds/FluidR3_GM.sf2"),
+    os.path.expanduser("~/Library/Audio/Sounds/TimGM6mb.sf2"),
+    os.path.expanduser("~/Library/Audio/Sounds/MuseScore_General.sf3"),
     "/opt/homebrew/share/soundfonts/MuseScore_General.sf3",
     "/usr/share/sounds/sf2/FluidR3_GM.sf2",
 ]
 
+def _soundfont_valido(p):
+    """Valida que o arquivo SF2/SF3 tem um cabeçalho RIFF íntegro."""
+    try:
+        with open(p, "rb") as f:
+            h = f.read(12)
+        if h[:4] != b"RIFF":
+            return False
+        riff_size = int.from_bytes(h[4:8], "little")
+        actual = os.path.getsize(p)
+        # SF3 pode ter small diff no size field; toleramos ±1MB
+        if abs(riff_size - (actual - 8)) > 1_048_576:
+            return False
+        return True
+    except OSError:
+        return False
+
 def _localizar_soundfont():
     for p in _SOUNDFONT_PATHS:
-        if os.path.exists(p):
+        if os.path.exists(p) and _soundfont_valido(p):
             return p
     return None
 
 
-def _compilar_audio(sintaxe, titulo, compasso, andamento=80, tonalidade="c \\major"):
+def _compilar_audio(sintaxe, titulo, compasso, andamento=80, tonalidade="c \\major", clef="G_2"):
     WORK_DIR.mkdir(exist_ok=True)
     for f in WORK_DIR.glob("midi_*"): f.unlink(missing_ok=True)
     for f in WORK_DIR.glob("audio_*"): f.unlink(missing_ok=True)
     # Gera .ly com \midi (aproveita a função orquestral se multi-voz)
-    ly = _sintaxe_com_midi(sintaxe, "REAL", titulo, compasso, andamento=andamento, tonalidade=tonalidade)
+    ly = _sintaxe_com_midi(sintaxe, "REAL", titulo, compasso, andamento=andamento, tonalidade=tonalidade, clef=clef)
     ly_path = WORK_DIR / "midi_preview.ly"
     ly_path.write_text(ly, encoding="utf-8")
     # Compila .ly → MIDI
@@ -701,8 +754,8 @@ def _compilar_audio(sintaxe, titulo, compasso, andamento=80, tonalidade="c \\maj
         return {"ok": True, "midi": wav_data, "wav": None,
                 "erro": "SoundFont não encontrado. Baixe um .sf2 em ~/Library/Audio/Sounds/",
                 "log": log.strip()}
-    fs_cmd = ["fluidsynth", "-ni", "-F", str(wav_path), "-g", "0.8", sf_path,
-              "-T", "wav", str(midi_path)]
+    fs_cmd = ["fluidsynth", "-ni", "-F", str(wav_path), "-g", "0.8", "-T", "wav",
+              sf_path, str(midi_path)]
     subprocess.run(fs_cmd, capture_output=True, text=True, timeout=180)
     if not wav_path.exists():
         return {"ok": False, "erro": "FluidSynth não gerou WAV", "log": log.strip()}
@@ -2779,11 +2832,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type",ctype)
         self.send_header("Content-Length",str(len(body)))
+        self.send_header("Access-Control-Allow-Origin","*")
+        self.send_header("Access-Control-Allow-Methods","GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Headers","Content-Type")
         self.end_headers()
         self.wfile.write(body)
     def _json(self):
         n=int(self.headers.get("Content-Length",0))
         return json.loads(self.rfile.read(n) or b"{}")
+
+    def do_OPTIONS(self):
+        self._send(200,"ok","text/plain")
 
     def do_GET(self):
         if self.path in ("/","/index.html"):
@@ -2792,6 +2851,8 @@ class Handler(BaseHTTPRequestHandler):
             pdf=WORK_DIR/"preview.pdf"
             if pdf.exists(): self._send(200,pdf.read_bytes(),"application/pdf")
             else: self._send(404,"Nenhum PDF renderizado.","text/plain; charset=utf-8")
+        elif self.path=="/clefs":
+            self._send(200, json.dumps(_CLEF_CHOICES), "application/json; charset=utf-8")
         else: self._send(404,b"not found","text/plain")
 
     def do_POST(self):
@@ -2800,6 +2861,7 @@ class Handler(BaseHTTPRequestHandler):
             d=self._json()
             modo=d.get("modo","REAL")
             ton=d.get("tonalidade","c \\major")
+            clef=d.get("clef","G_2")
             try:
                 if modo=="TAB":
                     res=compilar_tab(d.get("sintaxe",""),
@@ -2807,7 +2869,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     res=compilar(d.get("sintaxe",""),modo,
                                   d.get("titulo","Sem título"),d.get("compasso","2/4"),
-                                  tonalidade=ton)
+                                  tonalidade=ton, clef=clef)
             except Exception as e:
                 res={"ok":False,"log":str(e)}
             self._send(200,json.dumps(res),"application/json; charset=utf-8")
@@ -2864,7 +2926,8 @@ class Handler(BaseHTTPRequestHandler):
                 res=_compilar_audio(d.get("sintaxe",""),
                     d.get("titulo","Sem título"),d.get("compasso","2/4"),
                     andamento=d.get("andamento",80),
-                    tonalidade=d.get("tonalidade","c \\major"))
+                    tonalidade=d.get("tonalidade","c \\major"),
+                    clef=d.get("clef","G_2"))
             except Exception as e:
                 res={"ok":False,"erro":str(e)}
             self._send(200,json.dumps(res),"application/json; charset=utf-8")
@@ -2874,7 +2937,8 @@ class Handler(BaseHTTPRequestHandler):
                 res=_compilar_audio(d.get("sintaxe",""),
                     d.get("titulo","Sem título"),d.get("compasso","2/4"),
                     andamento=d.get("andamento",80),
-                    tonalidade=d.get("tonalidade","c \\major"))
+                    tonalidade=d.get("tonalidade","c \\major"),
+                    clef=d.get("clef","G_2"))
                 if res.get("midi"):
                     self._send(200,json.dumps({"ok":True,"midi":res["midi"]}),
                         "application/json; charset=utf-8")
@@ -2890,7 +2954,8 @@ class Handler(BaseHTTPRequestHandler):
                 res=_compilar_audio(d.get("sintaxe",""),
                     d.get("titulo","Sem título"),d.get("compasso","2/4"),
                     andamento=d.get("andamento",80),
-                    tonalidade=d.get("tonalidade","c \\major"))
+                    tonalidade=d.get("tonalidade","c \\major"),
+                    clef=d.get("clef","G_2"))
                 if res.get("wav"):
                     self._send(200,json.dumps({"ok":True,"wav":res["wav"]}),
                         "application/json; charset=utf-8")

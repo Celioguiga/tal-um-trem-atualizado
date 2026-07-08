@@ -39,7 +39,7 @@ export function BookletsPage() {
   if (loading) return <div style={{ color: vars["--textDim"] }}>Carregando...</div>;
 
   return (
-    <div className="space-y-6" style={{ color: vars["--text"] }}>
+    <div className="space-y-6 p-8" style={{ color: vars["--text"] }}>
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Booklets</h2>
@@ -49,7 +49,7 @@ export function BookletsPage() {
           onClick={handleRegenerate}
           disabled={regenerating}
           className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
-          style={{ background: vars["--primary"], color: "#fff" }}
+          style={{ background: vars["--accent"], color: "#fff" }}
         >
           {regenerating ? "Regenerando..." : "Regenerar Todos"}
         </button>
@@ -86,7 +86,7 @@ export function BookletsPage() {
                 href={api.pdfUrl(b.filename)}
                 target="_blank"
                 className="text-sm hover:underline"
-                style={{ color: vars["--primary"] }}
+                style={{ color: vars["--accent"] }}
               >
                 Abrir PDF →
               </a>

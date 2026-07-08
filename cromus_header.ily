@@ -145,8 +145,9 @@
                 (nota-idx (if (ly:pitch? pitch)
                             (modulo (ly:pitch-notename pitch) 7)
                             0)))
-           (ly:grob-set-property! grob 'stencil
-             (get-stencil-cromus nota-idx modo))))))))
+            (ly:grob-set-property! grob 'stencil
+              (get-stencil-cromus nota-idx modo))
+            (ly:grob-set-property! grob 'layer -1)))))))
 
 cromusReal  = #(cromus-engraver-factory "REAL")
 cromusForma = #(cromus-engraver-factory "FORMA")

@@ -1,4 +1,5 @@
 import argparse
+from synemusic.style import status_ok, status_erro, status_info, cabecalho
 
 
 def register(subparsers):
@@ -9,6 +10,9 @@ def register(subparsers):
 
 
 def run(args):
+    cabecalho()
+    print()
+
     pipe = args.pipeline
     if pipe == "auto":
         ext = args.source.lower().split(".")[-1] if "." in args.source else ""
@@ -17,5 +21,5 @@ def run(args):
         else:
             pipe = "B"
 
-    print(f"→ Pipeline {pipe}: transcrevendo {args.source}")
-    print("   (implementação em breve)")
+    print(status_info(f"Pipeline {pipe}: transcrevendo {args.source}"))
+    print(status_info("(implementação em breve)"))

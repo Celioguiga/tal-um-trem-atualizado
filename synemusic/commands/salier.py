@@ -1,4 +1,5 @@
 import argparse
+from synemusic.style import status_ok, status_info, cabecalho
 
 
 def register(subparsers):
@@ -7,6 +8,9 @@ def register(subparsers):
 
 
 def run(args):
+    cabecalho()
+    print()
+
     desc = " ".join(args.descricao) if args.descricao else "nova composição"
-    print(f"🎼 SalierIA compondo: {desc}")
-    print("   (implementação em breve)")
+    print(status_ok(f"SalierIA compondo: {desc}"))
+    print(status_info("(implementação em breve)"))

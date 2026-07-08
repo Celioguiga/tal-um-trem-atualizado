@@ -254,6 +254,128 @@ CTA: Comenta qual [pergunta de engajamento]
     return jsonify({"name": filename, "saved": True})
 
 
+# ── NFP RENDER (proxy para Cromus Studio) ──
+
+@app.route("/api/nfp/render", methods=["POST"])
+def nfp_render():
+    data = request.get_json()
+    try:
+        proc = subprocess.run(
+            ["curl", "-s", "--max-time", "180",
+             "-X", "POST", "http://localhost:4242/render",
+             "-H", "Content-Type: application/json",
+             "-d", json.dumps(data)],
+            capture_output=True, text=True, timeout=190)
+        if proc.returncode == 0 and proc.stdout:
+            return jsonify(json.loads(proc.stdout))
+        return jsonify({"ok": False, "log": proc.stderr or "Resposta vazia"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "log": "Timeout ao compilar partitura"}), 504
+    except Exception as e:
+        return jsonify({"ok": False, "log": str(e)}), 500
+
+
+# ── NFP NORMALIZAR (voz → sintaxe Cromus, conversor local, sem API) ──
+
+NOTA_PARA_GRAU = {
+    "do": "1", "dó": "1", "doh": "1",
+    "re": "2", "ré": "2", "rey": "2",
+    "mi": "3", "mih": "3",
+    "fa": "4", "fá": "4", "fah": "4",
+    "sol": "5", "sól": "5", "sohl": "5",
+    "la": "6", "lá": "6", "lah": "6",
+    "si": "7", "sih": "7",
+}
+
+ACIDENTES = {
+    "sustenido": "#", "sustentido": "#", "sharp": "#",
+    "bemol": "b", "bemól": "b", "flat": "b",
+    "meio tom acima": "#", "meio tom abaixo": "b",
+}
+
+PALAVRAS_DESCARTE = {
+    "o", "a", "os", "as", "um", "uma", "de", "da", "do", "das", "dos",
+    "em", "no", "na", "nos", "nas", "com", "pra", "para", "e", "mas",
+    "que", "tem", "tô", "estou", "eu", "vou", "nota", "grau",
+}
+
+OITAVA_MAP = {
+    "oitava acima": "'", "oitava abaixo": ",",
+    "agudo": "'", "grave": ",",
+    "prima": "", "segunda": "2", "terça": "3",
+    "quarta": "4", "quinta": "5", "sexta": "6", "sétima": "7",
+}
+
+
+def _aplicar_acento(palavra):
+    """Remove acentos para matching."""
+    import unicodedata
+    return "".join(
+        c for c in unicodedata.normalize("NFD", palavra)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def texto_para_sintaxe(texto: str) -> str:
+    tokens = texto.lower().split()
+    saida = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        t_clean = _aplicar_acento(t).strip(",.!?;:")
+        t_raw = t.strip(",.!?;:")
+
+        if t_raw in ("-", "pausa", "pausa."):
+            saida.append("-")
+            i += 1
+            continue
+
+        if t_raw in ("fim", "final"):
+            saida.append("FIM")
+            i += 1
+            continue
+
+        if t_raw in NOTA_PARA_GRAU:
+            grau = NOTA_PARA_GRAU[t_raw]
+            i += 1
+            if i < len(tokens):
+                prox = _aplicar_acento(tokens[i]).strip(",.!?;:")
+                if prox in ACIDENTES:
+                    grau += ACIDENTES[prox]
+                    i += 1
+            saida.append(grau)
+            continue
+
+        if t_clean.isdigit() and 1 <= int(t_clean) <= 7:
+            grau = t_clean
+            i += 1
+            if i < len(tokens):
+                prox = _aplicar_acento(tokens[i]).strip(",.!?;:")
+                if prox in ACIDENTES:
+                    grau += ACIDENTES[prox]
+                    i += 1
+            saida.append(grau)
+            continue
+
+        if t_raw not in PALAVRAS_DESCARTE and t_raw not in OITAVA_MAP:
+            saida.append(t_raw)
+
+        i += 1
+
+    return " ".join(saida)
+
+
+@app.route("/api/nfp/normalizar", methods=["POST"])
+def nfp_normalizar():
+    """Recebe texto transcrito por voz e converte para sintaxe Cromus (local, sem API)."""
+    data = request.get_json()
+    texto = (data.get("texto") or "").strip()
+    if not texto:
+        return jsonify({"ok": False, "erro": "Texto vazio"}), 400
+    sintaxe = texto_para_sintaxe(texto)
+    return jsonify({"ok": True, "sintaxe": sintaxe, "texto_original": texto})
+
+
 # ── REFERÊNCIAS ──
 
 @app.route("/api/references")
@@ -304,4 +426,4 @@ def toggle_angle():
 
 if __name__ == "__main__":
     print(" Note Form Pro API — http://localhost:4243")
-    app.run(host="0.0.0.0", port=4243, debug=True)
+    app.run(host="0.0.0.0", port=4243, debug=False)

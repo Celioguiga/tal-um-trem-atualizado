@@ -1,4 +1,5 @@
 import argparse
+from synemusic.style import status_ok, status_info, status_erro, cabecalho
 
 
 def register(subparsers):
@@ -8,10 +9,14 @@ def register(subparsers):
 
 
 def run(args):
+    cabecalho()
+    print()
+
     if args.action == "episodios":
         ep = args.ep if args.ep else "todos"
-        print(f"📖 Episódios Krisícho: {ep}")
+        print(status_ok(f"Episódios Krisícho: {ep}"))
     elif args.action == "personagens":
-        print("👑 Krisícho · Leo · Lorde Kenon · Taum · Harmonium · Harmonia")
+        print(status_info("Personagens:"))
+        print("  Krisícho · Leo · Lorde Kenon · Taum · Harmonium · Harmonia")
     elif args.action == "store":
-        print("🛍️ Krisícho Store — e-commerce contextual pedagógico")
+        print(status_ok("Krisícho Store — e-commerce contextual pedagógico"))

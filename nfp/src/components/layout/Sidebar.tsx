@@ -1,55 +1,94 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
+import { ThemeSwitcher } from "./ThemeSwitcher";
+import { useTheme } from "../../lib/theme";
 
-const links = [
-  { to: "/app", label: "Início", icon: "◈" },
-  { to: "/app/nfp", label: "Note Form Pro", icon: "♩" },
-  { to: "/app/maestro", label: "Maestro IA", icon: "◆" },
-  { to: "/app/salier", label: "SalierIA", icon: "✦" },
-  { to: "/app/transcribe", label: "Transcrever", icon: "⇄" },
-  { to: "/app/game", label: "Pássaro Mágico", icon: "▶" },
-  { to: "/app/perfil", label: "Perfil e Privacidade", icon: "⚙" },
+const sections = [
+  {
+    label: "CRIAÇÃO",
+    links: [
+      { to: "/app/nfp",       label: "Editor RNG" },
+      { to: "/app/tablatura", label: "Real Tablatura" },
+    ],
+  },
+  {
+    label: "GESTÃO",
+    links: [
+      { to: "/app/dashboard", label: "Dashboard" },
+      { to: "/app/booklets",  label: "Booklets" },
+      { to: "/app/campanhas", label: "Campanhas" },
+      { to: "/app/calendar",  label: "Calendário" },
+    ],
+  },
+  {
+    label: "ECOSSISTEMA",
+    links: [
+      { to: "/app/references",label: "Referências" },
+      { to: "/app/brand",     label: "Identidade" },
+    ],
+  },
 ];
 
 export function Sidebar() {
   const { user, logout } = useAuth();
+  const { vars } = useTheme();
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-64 bg-zinc-900 border-r border-zinc-800 flex flex-col z-40">
-      <div className="p-6 border-b border-zinc-800">
-        <h1 className="text-lg font-bold text-white">Note Form Pro</h1>
-        <p className="text-xs text-zinc-500 mt-0.5">Synemusic — RNG</p>
+    <aside
+      className="w-64 flex flex-col h-screen sticky top-0 select-none"
+      style={{ background: vars["--surface"], borderRight: `1px solid ${vars["--border"]}` }}
+    >
+      <div className="p-4 flex flex-col items-center border-b" style={{ borderColor: vars["--border"] }}>
+        <img src="/logo.png" alt="Note Form Pro" className="h-32 w-auto" />
       </div>
 
-      <nav className="flex-1 p-4 space-y-1">
-        {links.map((link) => (
-          <NavLink
-            key={link.to}
-            to={link.to}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                isActive
-                  ? "bg-rng-sol/10 text-rng-sol font-medium"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
-              }`
-            }
-          >
-            <span className="text-base w-5 text-center">{link.icon}</span>
-            {link.label}
-          </NavLink>
+      <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+        {sections.map((sec) => (
+          <div key={sec.label}>
+            <div className="text-[10px] font-semibold tracking-widest uppercase px-3 mb-1"
+              style={{ color: vars["--textMuted"] }}
+            >
+              {sec.label}
+            </div>
+            {sec.links.map((l) => (
+              <NavLink
+                key={l.to}
+                to={l.to}
+                end={l.to === "/app/nfp"}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+                style={({ isActive }) => ({
+                  color: isActive ? vars["--accent"] : vars["--textDim"],
+                  background: isActive ? vars["--accentGlow"] : "transparent",
+                })}
+              >
+                {l.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
 
-      <div className="p-4 border-t border-zinc-800 space-y-2">
-        <div className="px-3 py-2 text-sm text-zinc-400 truncate">
-          {user?.name}
+      <div className="p-3 border-t" style={{ borderColor: vars["--border"] }}>
+        <ThemeSwitcher />
+      </div>
+
+      <div className="px-4 py-2 space-y-1 border-t" style={{ borderColor: vars["--border"] }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs truncate" style={{ color: vars["--textMuted"] }}>{user?.email}</span>
+          <button onClick={logout} className="text-xs shrink-0 ml-2" style={{ color: "#C0001A" }}>
+            Sair
+          </button>
         </div>
-        <button
-          onClick={logout}
-          className="w-full px-3 py-2 text-sm text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors text-left"
-        >
-          Sair
-        </button>
+        {user?.plan === "free" && (
+          <div className="text-[10px] px-2 py-1 rounded" style={{ background: "#A69B8520", color: "#A69B85" }}>
+            Free · <a href="/app/perfil" className="underline" style={{ color: "#E8A820" }}>Upgrade</a>
+          </div>
+        )}
+        {user?.plan === "essencial" && (
+          <div className="text-[10px] px-2 py-1 rounded" style={{ background: "#E8A82020", color: "#E8A820" }}>
+            Essencial
+          </div>
+        )}
       </div>
     </aside>
   );

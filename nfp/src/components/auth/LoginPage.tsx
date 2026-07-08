@@ -134,8 +134,8 @@ export function LoginPage() {
 
           <div className="rounded-lg p-3" style={{ background: "#3399EE10", border: "1px solid #3399EE25" }}>
             <p className="text-xs leading-relaxed text-center" style={{ color: "#556677" }}>
-              <strong style={{ color: "#1A2A3A" }}>Plano Free:</strong> 10 compassos · uma cantiga ·
-              sem exportação. <strong style={{ color: "#1A2A3A" }}>Essencial R$97/mês:</strong> ilimitado.
+              <strong style={{ color: "#1A2A3A" }}>Plano Free:</strong> compassos ilimitados · uma cantiga ·
+              sem exportação. <strong style={{ color: "#1A2A3A" }}>Essencial R$97/mês:</strong> tudo liberado.
             </p>
           </div>
 

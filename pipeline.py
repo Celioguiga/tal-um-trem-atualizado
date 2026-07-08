@@ -140,9 +140,9 @@ _O_CRAVO = {
 }
 
 CANTIGAS = [
-    # _DONA_ARANHA,   # ← reativar quando necessário
-    # _PEIXE_VIVO,    # ← reativar quando necessário
-    # _CARANGUEJO,    # ← reativar quando necessário
+    _DONA_ARANHA,
+    _PEIXE_VIVO,
+    _CARANGUEJO,
     # _O_CRAVO,       # ← reativar quando necessário
     {
         "titulo": "O Pião",
@@ -236,6 +236,8 @@ def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
     usando_raw = "notas_ly_raw" in cantiga
     tem_letra  = usando_raw and "letra_ly" in cantiga
 
+    _modo_engraver = "REAL" if modo == "STAFFLESS" else modo
+
     if usando_raw:
         bloco_layout = (
             '  \\layout {\n'
@@ -245,10 +247,23 @@ def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
             '    }\n'
             '  }\n'
         )
+        if modo == "STAFFLESS":
+            bloco_staffless_overrides = (
+                '      \\stopStaff\n'
+                '      \\omit Staff.BarLine\n'
+                '      \\omit Staff.Clef\n'
+                '      \\omit Staff.TimeSignature\n'
+                '      \\omit Staff.KeyCancellation\n'
+                '      \\omit Staff.Accidental\n'
+                '      \\omit Staff.LedgerLineSpanner\n'
+            )
+        else:
+            bloco_staffless_overrides = ''
         if tem_letra:
             bloco_staff = (
                 '    \\new Voice = "melodia" {\n'
-                '      \\clef treble\n'
+                + bloco_staffless_overrides
+                + '      \\clef treble\n'
                 + cantiga["notas_ly_raw"] +
                 '    }\n'
                 '    \\new Lyrics \\lyricsto "melodia" {\n'
@@ -257,7 +272,8 @@ def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
             )
         else:
             bloco_staff = (
-                '    \\clef treble\n'
+                bloco_staffless_overrides
+                + '    \\clef treble\n'
                 + cantiga["notas_ly_raw"]
             )
     else:
@@ -266,16 +282,35 @@ def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
         c_por_linha = cantiga.get("compassos_por_linha", 4)
         tonalidade  = cantiga["tonalidade"]
         notas_lily  = _converter_notas(cantiga["vozes"][0]["notas"], compasso, c_por_linha)
-        bloco_staff = (
-            '    {\n'
-            '      \\clef treble\n'
-            f'      \\key {tonalidade}\n'
-            f'      \\time {compasso}\n'
-            f'      \\tempo 4 = {andamento}\n\n'
-            f'      {notas_lily}\n'
-            '      \\bar "|."\n'
-            '    }\n'
-        )
+        if modo == "STAFFLESS":
+            bloco_staff = (
+                '    {\n'
+                '      \\stopStaff\n'
+                '      \\omit Staff.BarLine\n'
+                '      \\omit Staff.Clef\n'
+                '      \\omit Staff.TimeSignature\n'
+                '      \\omit Staff.KeyCancellation\n'
+                '      \\omit Staff.Accidental\n'
+                '      \\omit Staff.LedgerLineSpanner\n'
+                '      \\clef treble\n'
+                f'      \\key {tonalidade}\n'
+                f'      \\time {compasso}\n'
+                f'      \\tempo 4 = {andamento}\n\n'
+                f'      {notas_lily}\n'
+                '      \\bar "|."\n'
+                '    }\n'
+            )
+        else:
+            bloco_staff = (
+                '    {\n'
+                '      \\clef treble\n'
+                f'      \\key {tonalidade}\n'
+                f'      \\time {compasso}\n'
+                f'      \\tempo 4 = {andamento}\n\n'
+                f'      {notas_lily}\n'
+                '      \\bar "|."\n'
+                '    }\n'
+            )
         bloco_layout = (
             '  \\layout {\n'
             '    \\context {\n'
@@ -289,7 +324,7 @@ def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
     _body_close = '>>' if tem_letra else '}'
     staff_open  = (
         f'  \\new Staff \\with {{\n'
-        f'    \\consists #(cromus-engraver-factory "{modo}")\n'
+        f'    \\consists #(cromus-engraver-factory "{_modo_engraver}")\n'
         f'  }} {_body_open}\n'
     )
     staff_close = f'  {_body_close}\n'
@@ -305,13 +340,20 @@ def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
         '#(set-global-staff-size 38)\n'
         '\n\\paper {\n'
         '  #(set-paper-size "a4")\n'
+        '  ragged-bottom = ##f\n'
         '  ragged-last   = ##f\n'
         '  indent        = 1.2\\cm\n'
         '  short-indent  = 0\\cm\n'
-        '  top-margin    = 20\\mm\n'
-        '  bottom-margin = 20\\mm\n'
-        '  left-margin   = 20\\mm\n'
-        '  right-margin  = 20\\mm\n'
+        '  top-margin    = 12\\mm\n'
+        '  bottom-margin = 12\\mm\n'
+        '  left-margin   = 15\\mm\n'
+        '  right-margin  = 15\\mm\n'
+        '  print-page-number = ##t\n'
+        '  print-first-page-number = ##t\n'
+        '  system-system-spacing.padding = 6\\mm\n'
+        '  system-system-spacing.minimum-distance = 4\\mm\n'
+        '  page-limit-inter-system-space = ##t\n'
+        '  page-limit-inter-system-space-factor = 1.3\n'
         '}\n\n'
         '\\score {\n'
         + staff_open
@@ -355,7 +397,7 @@ def main():
     for cantiga in CANTIGAS:
         slug = _slug(cantiga["titulo"])
         print(f"\n► {cantiga['titulo']}")
-        for modo in ["REAL", "FORMA"]:
+        for modo in ["REAL", "FORMA", "STAFFLESS"]:
             nome_base  = f"{slug}_{modo.lower()}"
             saida_ly   = os.path.join(output_dir, f"{nome_base}.ly")
             saida_pdf  = os.path.join(output_dir, f"{nome_base}.pdf")

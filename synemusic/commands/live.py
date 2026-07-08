@@ -1,4 +1,5 @@
 import argparse
+from synemusic.style import status_ok, status_info, cabecalho
 
 
 def register(subparsers):
@@ -8,8 +9,17 @@ def register(subparsers):
 
 
 def run(args):
+    cabecalho()
+    print()
+
     if args.mode == "ensaio":
         piece = args.piece or "última peça"
-        print(f"🎯 Modo Ensaio — peça: {piece}")
+        print(status_ok(f"Modo Ensaio — peça: {piece}"))
+        print()
+        print("  Pratique com o metrônomo interno e receba")
+        print("  feedback em tempo real do seu desempenho.")
     elif args.mode == "show":
-        print("🎤 Modo Show — performance ao vivo")
+        print(status_info("Modo Show — performance ao vivo"))
+        print()
+        print("  Prepare-se para a apresentação!")
+        print("  Acompanhamento automático, luzes e palco virtual.")

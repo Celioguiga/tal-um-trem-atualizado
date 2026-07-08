@@ -12,13 +12,20 @@
 
 \paper {
   #(set-paper-size "a4")
+  ragged-bottom = ##f
   ragged-last   = ##f
   indent        = 1.2\cm
   short-indent  = 0\cm
-  top-margin    = 20\mm
-  bottom-margin = 20\mm
-  left-margin   = 20\mm
-  right-margin  = 20\mm
+  top-margin    = 12\mm
+  bottom-margin = 12\mm
+  left-margin   = 15\mm
+  right-margin  = 15\mm
+  print-page-number = ##t
+  print-first-page-number = ##t
+  system-system-spacing.padding = 6\mm
+  system-system-spacing.minimum-distance = 4\mm
+  page-limit-inter-system-space = ##t
+  page-limit-inter-system-space-factor = 1.3
 }
 
 \score {

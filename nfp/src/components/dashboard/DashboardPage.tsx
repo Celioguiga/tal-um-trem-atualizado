@@ -1,4 +1,4 @@
-import { AppLayout } from "../layout/AppLayout";
+import { useTheme } from "../../lib/theme";
 
 const cards = [
   {
@@ -52,44 +52,41 @@ const cards = [
 ];
 
 export function DashboardPage() {
+  const { vars } = useTheme();
   return (
-    <AppLayout title="Dashboard">
-      <div className="space-y-8">
-        <div>
-          <h2 className="text-2xl font-bold text-white">
-            Bem-vindo ao Note Form Pro
-          </h2>
-          <p className="text-zinc-400 mt-1">
-            Ecossistema Synemusic — Metodologia Real Nota Grau
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cards.map((card) => (
-            <div
-              key={card.title}
-              className={`${card.bg} ${card.border} border rounded-xl p-6 space-y-3 hover:brightness-110 transition-all`}
-            >
-              <div className={`w-10 h-10 rounded-lg ${card.bg} border ${card.border} flex items-center justify-center`}>
-                <span className={`text-lg ${card.color}`}>{card.icon}</span>
-              </div>
-              <h3 className="font-semibold text-white">{card.title}</h3>
-              <p className="text-sm text-zinc-400 leading-relaxed">{card.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-          <h3 className="text-white font-semibold mb-2">Metodologia RNG</h3>
-          <p className="text-sm text-zinc-400 leading-relaxed">
-            <strong className="text-zinc-300">Real Nota Forma Grau.</strong>{" "}
-            Cada nota tem cor fixa, cada grau tem forma geométrica fixa.
-            Com a tonalidade, as formas rotacionam e as cores acompanham as notas.
-            O Note Form Pro é o grimório digital da RNG — o instrumento de
-            trabalho do professor em sala de aula ao vivo.
-          </p>
-        </div>
+    <div className="space-y-8 p-8" style={{ color: vars["--text"] }}>
+      <div>
+        <h2 className="text-2xl font-bold">Bem-vindo ao Note Form Pro</h2>
+        <p className="mt-1" style={{ color: vars["--textDim"] }}>
+          Ecossistema Synemusic — Metodologia Real Nota Grau
+        </p>
       </div>
-    </AppLayout>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {cards.map((card) => (
+          <div
+            key={card.title}
+            className={`${card.bg} ${card.border} border rounded-xl p-6 space-y-3`}
+          >
+            <div className={`w-10 h-10 rounded-lg ${card.bg} border ${card.border} flex items-center justify-center`}>
+              <span className={`text-lg ${card.color}`}>{card.icon}</span>
+            </div>
+            <h3 className="font-semibold" style={{ color: vars["--text"] }}>{card.title}</h3>
+            <p className="text-sm leading-relaxed" style={{ color: vars["--textDim"] }}>{card.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl p-6" style={{ background: vars["--surface"], border: `1px solid ${vars["--border"]}` }}>
+        <h3 className="font-semibold mb-2" style={{ color: vars["--text"] }}>Metodologia RNG</h3>
+        <p className="text-sm leading-relaxed" style={{ color: vars["--textDim"] }}>
+          <strong style={{ color: vars["--text"] }}>Real Nota Forma Grau.</strong>{" "}
+          Cada nota tem cor fixa, cada grau tem forma geométrica fixa.
+          Com a tonalidade, as formas rotacionam e as cores acompanham as notas.
+          O Note Form Pro é o grimório digital da RNG — o instrumento de
+          trabalho do professor em sala de aula ao vivo.
+        </p>
+      </div>
+    </div>
   );
 }

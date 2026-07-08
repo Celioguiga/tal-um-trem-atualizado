@@ -1,39 +1,43 @@
-import { BRAND, RNFG_ARRAY, SHAPE_PATHS } from "../../lib/brand";
+import { WAVE_PATH, WAVE_NODES, SYMUSIC } from "../../lib/brand";
 
 type Size = "sm" | "md" | "lg";
+const SIZES = { sm: 20, md: 30, lg: 44 };
+const FONT_SIZES = { sm: "text-xs", md: "text-lg", lg: "text-2xl" };
+const SUB_SIZES = { sm: "text-[8px]", md: "text-[10px]", lg: "text-xs" };
 
-const SIZES = { sm: 20, md: 28, lg: 40 };
-const FONT_SIZES = { sm: "text-sm", md: "text-lg", lg: "text-2xl" };
+const GRADIENT_ID = "cromusGrad";
 
 export function Logo({ size = "md", showTagline = false }: { size?: Size; showTagline?: boolean }) {
-  const s = SIZES[size];
-  const gap = Math.round(s * 0.15);
-  const shapeSize = Math.round(s * 0.45);
+  const svgW = 240;
+  const svgH = 120;
+  const displayW = SIZES[size] * 2;
+  const displayH = displayW * (svgH / svgW);
 
   return (
-    <div className="inline-flex items-center gap-2">
-      <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} className="shrink-0">
-        {RNFG_ARRAY.map((c, i) => {
-          const x = (i * (shapeSize + gap)) + (s - (RNFG_ARRAY.length * (shapeSize + gap) - gap)) / 2;
-          const y = (s - shapeSize) / 2;
-          return (
-            <path
-              key={c.nome}
-              d={SHAPE_PATHS[Object.keys(SHAPE_PATHS)[i] as keyof typeof SHAPE_PATHS]}
-              fill={c.hex}
-              opacity={0.9}
-              transform={`translate(${x}, ${y}) scale(${shapeSize / 24})`}
-            />
-          );
-        })}
+    <div className="inline-flex items-center gap-2.5">
+      <svg width={displayW} height={displayH} viewBox={`0 0 ${svgW} ${svgH}`} className="shrink-0">
+        <defs>
+          <linearGradient id={GRADIENT_ID} gradientUnits="userSpaceOnUse" x1="20" y1="0" x2="220" y2="0">
+            <stop offset="0" stopColor="#C0001A" /><stop offset=".1667" stopColor="#ECD200" />
+            <stop offset=".3333" stopColor="#F07300" /><stop offset=".5" stopColor="#00B050" />
+            <stop offset=".6667" stopColor="#0066FF" /><stop offset=".8333" stopColor="#8B5E00" />
+            <stop offset="1" stopColor="#9B5FC0" />
+          </linearGradient>
+        </defs>
+        <path d={WAVE_PATH} fill="none" stroke={`url(#${GRADIENT_ID})`} strokeWidth="9" strokeLinecap="round" />
+        {WAVE_NODES.map((n, i) => (
+          <circle key={i} cx={n.x} cy={n.y} r="5" fill={n.c} />
+        ))}
       </svg>
       <div className="flex flex-col leading-tight">
-        <span className={`${FONT_SIZES[size]} font-bold text-white tracking-tight`}>
-          {BRAND.name}
+        <span className={`${FONT_SIZES[size]} font-semibold tracking-tight`}
+          style={{ color: "#F5F2EA" }}
+        >
+          Note Form Pro
         </span>
         {showTagline && (
-          <span className="text-[10px] text-zinc-500 font-medium tracking-wide uppercase">
-            {BRAND.tagline}
+          <span className={`${SUB_SIZES[size]} font-medium tracking-wider`} style={{ color: "#A69B85" }}>
+            {SYMUSIC.tagline.toLowerCase()}
           </span>
         )}
       </div>

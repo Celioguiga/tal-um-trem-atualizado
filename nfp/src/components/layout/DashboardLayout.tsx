@@ -7,7 +7,7 @@ export function DashboardLayout() {
   return (
     <div className="flex min-h-screen" style={{ background: vars["--bg"], color: vars["--text"] }}>
       <Sidebar />
-      <main className="flex-1 p-8 overflow-auto">
+      <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
     </div>
