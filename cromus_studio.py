@@ -107,6 +107,139 @@ _CLEF_CHOICES = [
     ("Clave de Dó (linha 4)", "C_4"),
 ]
 
+_CLEF_OVERRIDES = {
+    "C_1": {"glyph": "clefs.C", "pos": -4, "mcp": -4, "offset": "#'(0 . -2)"},
+    "C_2": {"glyph": "clefs.C", "pos": -2, "mcp": -2, "offset": "#'(0 . -1)"},
+    "C_3": {"glyph": "clefs.C", "pos": 0,  "mcp": 0,  "offset": None},
+    "C_4": {"glyph": "clefs.C", "pos": 2,  "mcp": 2,  "offset": None},
+    "G_1": {"glyph": "clefs.G", "pos": -4, "mcp": -4, "offset": None},
+    "G_2": {"glyph": "clefs.G", "pos": -2, "mcp": -2, "offset": None},
+    "F_3": {"glyph": "clefs.F", "pos": 0,  "mcp": 0,  "offset": None},
+    "F_4": {"glyph": "clefs.F", "pos": 2,  "mcp": 2,  "offset": None},
+}
+
+# Transposição em passos diatônicos da clave de sol (G_2) para outras claves
+# Usado para manter a posição visual das notas ao mudar de clave
+_CLEF_TRANSPOSE_STEPS = {
+    "G_2": 0,    # Clave de Sol linha 2 (referência)
+    "G_1": -2,   # Clave de Sol linha 1 (2 posições abaixo)
+    "C_3": 2,    # Clave de Dó linha 3 (2 posições acima)
+    "C_4": 4,    # Clave de Dó linha 4 (4 posições acima)
+    "C_1": -4,   # Clave de Dó linha 1 (4 posições abaixo)
+    "C_2": -2,   # Clave de Dó linha 2 (2 posições abaixo)
+    "F_3": 4,    # Clave de Fá linha 3 (4 posições acima)
+    "F_4": 6,    # Clave de Fá linha 4 (6 posições acima)
+}
+
+# Conversão de passos diatônicos para semitons por tonalidade
+# Cada grau da escala maior tem esta sequência de semitons: 2 2 1 2 2 2 1
+_SEMITONES_POR_GRAU_MAIOR = [0, 2, 4, 5, 7, 9, 11]
+
+def _calcular_semitons_transposicao(steps, tonalidade="c \\major"):
+    """Converte passos diatônicos em semitons baseado na tonalidade."""
+    if steps == 0:
+        return 0
+    # Normaliza steps para 0-6
+    normalized = ((steps % 7) + 7) % 7
+    # Calcula semitons baseado na escala maior
+    semitons = _SEMITONES_POR_GRAU_MAIOR[normalized]
+    # Ajusta para direção
+    if steps < 0:
+        semitons = -semitons
+        # Corrige para passos negativos
+        if steps <= -7:
+            semitons = -12 * (abs(steps) // 7) + _calcular_semitons_transposicao(steps % 7, tonalidade)
+    elif steps >= 7:
+        semitons = 12 * (steps // 7) + _calcular_semitons_transposicao(steps % 7, tonalidade)
+    return semitons
+
+def _transpor_sintaxe_para_clef(sintaxe, clef_origem, clef_destino):
+    """Transpõe a sintaxe para manter a posição visual ao mudar de clave.
+    
+    Quando mudamos de clave (ex: G_2 para C_3), as notas precisam ser
+    transpostas para manter a mesma posição visual no pentagrama.
+    
+    Exemplo: Em clave de sol, Dó (grau 1) está na primeira linha debaixo.
+             Em clave de dó (alto), Dó precisa subir 2 posições para
+             ficar na terceira linha (onde a clave de dó indica o Dó).
+    """
+    if clef_origem == clef_destino:
+        return sintaxe
+    
+    steps_origem = _CLEF_TRANSPOSE_STEPS.get(clef_origem, 0)
+    steps_destino = _CLEF_TRANSPOSE_STEPS.get(clef_destino, 0)
+    steps_diff = steps_destino - steps_origem
+    
+    if steps_diff == 0:
+        return sintaxe
+    
+    # Usa a função de transposição existente
+    return transpose_cromus(sintaxe, steps_diff)
+
+
+# Mapeamento nota→índice diatônico (0=C, 1=D, ..., 6=B)
+_NOTE_TO_DIA_IDX = {'c': 0, 'd': 1, 'e': 2, 'f': 3, 'g': 4, 'a': 5, 'b': 6}
+
+def _transpor_sintaxe_real_nota(sintaxe, tonalidade):
+    """Transpõe a sintaxe para modo REAL_NOTA: 1=tônica, 2=supertônica, etc.
+    
+    Em REAL_NOTA, os números 1–7 são GRAUS relativos à escala, não notas absolutas.
+    Em Sol maior: 1=G, 2=A, 3=B, 4=C, 5=D, 6=E, 7=F#.
+    A transposição desloca cada nota pelo intervalo diatônico entre C e o tónica.
+    """
+    tonic_name = tonalidade.strip().split()[0][0].lower()
+    shift = _NOTE_TO_DIA_IDX.get(tonic_name, 0)
+    if shift == 0:
+        return sintaxe  # C maior = sem transposição
+
+    # Separa por espaços ou vírgulas
+    tokens = re.split(r'[,\s]+', sintaxe.strip())
+    novos = []
+    for tok in tokens:
+        if not tok:
+            continue
+        # Padrão: aspas_opcionais + dígitos(1-7) + acidentes(#b) + sufixos('*')
+        m = re.match(r"^('?)(\d+)(#*|b*)(['*]*)$", tok)
+        if m:
+            aspas, num_str, acidentes, sufixos = m.groups()
+            num = int(num_str)
+            if 1 <= num <= 7:
+                novo_num = ((num - 1 + shift) % 7) + 1
+                novos.append(f"{aspas}{novo_num}{acidentes}{sufixos}")
+            else:
+                novos.append(tok)
+        else:
+            novos.append(tok)
+    return ' '.join(novos)
+
+# Mapeamento código interno → nome de clave padrão do LilyPond.
+# IMPORTANTE: nunca passar "G_2"/"C_3" etc. diretamente ao \clef do LilyPond:
+# o underscore é interpretado como OCTAVAÇÃO (ex.: "G_2" = clave de sol
+# transposta uma segunda abaixo), fazendo as notas saírem uma segunda acima.
+_CLEF_LILYNAME = {
+    "G_2": "treble",        # clave de sol na 2ª linha
+    "G_1": "french",        # clave de sol na 1ª linha (french violin)
+    "F_4": "bass",          # clave de fá na 4ª linha
+    "F_3": "varbaritone",   # clave de fá na 3ª linha
+    "C_1": "soprano",       # clave de dó na 1ª linha
+    "C_2": "mezzosoprano",  # clave de dó na 2ª linha
+    "C_3": "alto",          # clave de dó na 3ª linha
+    "C_4": "tenor",         # clave de dó na 4ª linha
+}
+
+def _gerar_clef_override(clef):
+    """Retorna (clef_lily, override_code) para a clave dada.
+
+    clef_lily é o nome PADRÃO do LilyPond (treble, alto, bass, ...), garantindo
+    glyph/posição/middleCPosition corretos sem overrides manuais e sem a
+    octavação indesejada causada por nomes com underscore.
+    """
+    nome = _CLEF_LILYNAME.get(clef)
+    if nome:
+        return (nome, "")
+    # Fallback: se já for um nome válido do LilyPond, usa como está
+    return (clef, "")
+
 
 def _is_orquestral(sintaxe):
     return bool(re.search(r'^---', sintaxe, re.MULTILINE))
@@ -143,7 +276,7 @@ def _resolver_instrumento(nome):
     return {"clef": "treble", "midi": 40, "abrev": nome.strip()}
 
 
-def _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=80, tonalidade="c \\major"):
+def _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=80, tonalidade="c \\major", modo="REAL"):
     vozes = _parse_orquestral(sintaxe)
     if not vozes:
         return _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
@@ -153,13 +286,16 @@ def _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=80, tonalidade="c \
         ly_raw = _sintaxe_para_ly_raw(voz["sintaxe"], compasso, andamento=andamento, tonalidade=tonalidade)
         clef = _CLEF_LILY.get(inst["clef"], "treble")
         midi_prog = inst["midi"]
+        clef_lily, clef_override = _gerar_clef_override(clef)
+        _cly = f'"{clef_lily}"' if '_' in clef_lily else clef_lily
         staff = (
             f'    \\new Staff \\with {{\n'
             f'      instrumentName = "{inst["abrev"]}"\n'
             f'      midiInstrument = #{midi_prog}\n'
             f'    }}\n'
             f'    {{\n'
-            f'      \\clef {clef}\n'
+            f'{clef_override}'
+            f'      \\clef {_cly}\n'
             f'      {ly_raw.strip()}\n'
             f'    }}\n'
         )
@@ -174,17 +310,19 @@ def _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=80, tonalidade="c \
 
 def _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major", clef="G_2"):
     """Gera bloco \\score com \\midi para orquestral ou monofônico."""
-    clef_lily = _CLEF_LILY.get(clef, "treble")
+    clef_lily, clef_override = _gerar_clef_override(clef)
+    _cly = f'"{clef_lily}"' if '_' in clef_lily else clef_lily
     orquestral = _is_orquestral(sintaxe)
     if orquestral:
-        raw = _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
+        raw = _sintaxe_para_ly_orquestral(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade, modo=modo)
     else:
         raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
         modoe = "REAL" if modo == "STAFFLESS" else modo
         raw = (
             f'    \\new Staff \\with {{ midiInstrument = #"violin" }}\n'
             f'    {{\n'
-            f'      \\clef {clef_lily}\n'
+            f'{clef_override}'
+            f'      \\clef {_cly}\n'
             f'      {raw.strip()}\n'
             f'    }}\n'
         )
@@ -454,14 +592,25 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
 
 def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major", clef="G_2"):
     import tempfile, os
-    clef_lily = _CLEF_LILY.get(clef, "treble")
+    clef_lily, clef_override = _gerar_clef_override(clef)
+    
+    # Em REAL_NOTA, 1=tônica, 2=supertônica: transpõe pela tonalidade
+    sintaxe_transposta = sintaxe
+    if modo == "REAL_NOTA":
+        sintaxe_transposta = _transpor_sintaxe_real_nota(sintaxe_transposta, tonalidade)
+    
+    # Transposição da sintaxe para manter posição visual ao mudar de clave
+    # A sintaxe original é escrita assumeindo clave de sol (G_2)
+    # Se mudarmos para outra clave, precisamos transpor as notas
+    sintaxe_transposta = _transpor_sintaxe_para_clef(sintaxe_transposta, "G_2", clef)
+    
     # Rota orquestral: gera LilyPond completo diretamente
     if _is_orquestral(sintaxe):
-        ly = _sintaxe_com_midi(sintaxe, modo, titulo, compasso, andamento=andamento, tonalidade=tonalidade)
+        ly = _sintaxe_com_midi(sintaxe_transposta, modo, titulo, compasso, andamento=andamento, tonalidade=tonalidade, clef=clef)
         return ly
     # Rota monofônica: usa pipeline legado
     fn, nome = _localizar_parser()
-    notas_raw = _sintaxe_para_ly_raw(sintaxe, compasso, andamento=andamento, tonalidade=tonalidade)
+    notas_raw = _sintaxe_para_ly_raw(sintaxe_transposta, compasso, andamento=andamento, tonalidade=tonalidade)
     cantiga = {
         "titulo": titulo, "compositor": "Synemusic", "compasso": compasso,
         "tonalidade": tonalidade, "andamento": andamento, "compassos_por_linha": 4,
@@ -473,7 +622,17 @@ def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="
         fn(cantiga, saida_ly, modo)
         ly_text = Path(saida_ly).read_text(encoding="utf-8")
         # Substitui a clave padrão do pipeline pela selecionada
-        ly_text = re.sub(r'\\clef\s+treble', r'\\clef ' + clef_lily, ly_text)
+        if clef_override:
+            _clev = clef_override
+            _cly = f'"{clef_lily}"' if '_' in clef_lily else clef_lily
+            ly_text = re.sub(
+                r'\\clef\s+treble',
+                lambda m: _clev + r'      \clef ' + _cly,
+                ly_text
+            )
+        else:
+            _cly = f'"{clef_lily}"' if '_' in clef_lily else clef_lily
+            ly_text = re.sub(r'\\clef\s+treble', lambda m: r'      \clef ' + _cly, ly_text)
         return ly_text
     finally:
         try: os.unlink(saida_ly)
@@ -590,7 +749,7 @@ def _gerar_tab_ly(sintaxe, titulo, compasso, andamento=80, tonalidade="c \\major
         '\\score {\n'
         '  <<\n'
         '    \\new Staff \\with {\n'
-        '      \\consists #(cromus-engraver-factory "REAL")\n'
+        '      \\consists #(cromus-engraver-factory "{modo}")\n'
         '    } {\n'
         f'      \\clef treble\n'
         f'      \\key {tonalidade}\n'
@@ -814,6 +973,261 @@ def _detectar_sintaxe_no_texto(texto):
     tokens = re.findall(r'\b[0-7](?:[#b])?(?:[whqest])\.?~?\b', texto)
     if len(tokens) < 3: return ''
     return ',\n'.join(' '.join(tokens[i:i+4]) for i in range(0,len(tokens),4))
+
+
+# ─────────────────────────── TRANSPOSIÇÃO DE SINTAXE ────────────────────────
+
+import re as _re_transpose
+
+def _parse_cromus_token(token):
+    """Parse um token Cromus em seus componentes.
+    Retorna dict com leading_apos, degree, trailing_apos, accidental, duration ou None."""
+    if not token or not _re_transpose.match(r"^['1-7]", token):
+        return None
+    pos = 0
+    leading_apos = 0
+    while pos < len(token) and token[pos] == "'":
+        leading_apos += 1
+        pos += 1
+    if pos >= len(token) or not token[pos].isdigit() or token[pos] == '0':
+        return None
+    degree = int(token[pos])
+    pos += 1
+    trailing_apos = 0
+    accidental = ""
+    duration = ""
+    while pos < len(token):
+        ch = token[pos]
+        if ch == "'":
+            trailing_apos += 1
+        elif ch in ('#', 'b'):
+            accidental += ch
+        elif ch == '*':
+            duration += ch
+        else:
+            break
+        pos += 1
+    if pos < len(token):
+        return None
+    return {
+        "leading_apos": leading_apos,
+        "degree": degree,
+        "trailing_apos": trailing_apos,
+        "accidental": accidental,
+        "duration": duration,
+    }
+
+def _reassemble_cromus(degree, octave_offset, accidental, duration):
+    """Remonta um token Cromus a partir de seus componentes."""
+    result = ""
+    if octave_offset < 0:
+        result += "'" * (-octave_offset)
+    result += str(degree)
+    if octave_offset > 0:
+        result += "'" * octave_offset
+    result += accidental
+    result += duration
+    return result
+
+def transpose_cromus(sintaxe, shift):
+    """Transpõe a sintaxe Cromus por 'shift' graus (7 = 8va)."""
+    if shift == 0:
+        return sintaxe
+    partes = _re_transpose.split(r'(\s+)', sintaxe)
+    resultado = []
+    for parte in partes:
+        if _re_transpose.match(r'^\s+$', parte) or parte == "":
+            resultado.append(parte)
+            continue
+        parsed = _parse_cromus_token(parte)
+        if not parsed:
+            resultado.append(parte)
+            continue
+        new_degree = parsed["degree"] + shift
+        octave_offset = parsed["trailing_apos"] - parsed["leading_apos"]
+        while new_degree > 7:
+            new_degree -= 7
+            octave_offset += 1
+        while new_degree < 1:
+            new_degree += 7
+            octave_offset -= 1
+        resultado.append(_reassemble_cromus(new_degree, octave_offset, parsed["accidental"], parsed["duration"]))
+    return "".join(resultado)
+
+# Mapeamento de tonalidade LilyPond → índice cromático (0-11)
+KEY_CHROMATIC = {
+    "c \\major": 0, "c \\minor": 0,
+    "cis \\major": 1, "cis \\minor": 1,
+    "d \\major": 2, "d \\minor": 2,
+    "dis \\major": 3, "dis \\minor": 3, "ees \\minor": 3,
+    "e \\major": 4, "e \\minor": 4,
+    "f \\major": 5, "f \\minor": 5,
+    "fis \\major": 6, "fis \\minor": 6, "ges \\major": 6,
+    "g \\major": 7, "g \\minor": 7,
+    "gis \\minor": 8,
+    "aes \\major": 8, "aes \\minor": 8,
+    "a \\major": 9, "a \\minor": 9,
+    "ais \\minor": 10,
+    "bes \\major": 10, "bes \\minor": 10,
+    "b \\major": 11, "b \\minor": 11, "ces \\major": 11,
+    "des \\major": 1,
+}
+
+# Semitons por grau da escala maior
+_DEGREE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]
+
+def _degree_shift_to_semitones(shift):
+    normalized = ((shift % 7) + 7) % 7
+    return _DEGREE_SEMITONES[normalized]
+
+# Mapas reversos: índice cromático → nome de tonalidade
+CHROMATIC_TO_KEY_SHARP = {
+    0: "c \\major", 1: "cis \\major", 2: "d \\major", 3: "dis \\major",
+    4: "e \\major", 5: "f \\major", 6: "fis \\major", 7: "g \\major",
+    8: "gis \\major", 9: "a \\major", 10: "ais \\major", 11: "b \\major",
+}
+CHROMATIC_TO_KEY_FLAT = {
+    0: "c \\major", 1: "des \\major", 2: "d \\major", 3: "ees \\major",
+    4: "e \\major", 5: "f \\major", 6: "ges \\major", 7: "g \\major",
+    8: "aes \\major", 9: "a \\major", 10: "bes \\major", 11: "ces \\major",
+}
+CHROMATIC_TO_MINOR_SHARP = {
+    0: "a \\minor", 1: "ais \\minor", 2: "b \\minor", 3: "cis \\minor",
+    4: "c \\minor", 5: "d \\minor", 6: "dis \\minor", 7: "e \\minor",
+    8: "f \\minor", 9: "fis \\minor", 10: "g \\minor", 11: "gis \\minor",
+}
+CHROMATIC_TO_MINOR_FLAT = {
+    0: "a \\minor", 1: "bes \\minor", 2: "b \\minor", 3: "c \\minor",
+    4: "c \\minor", 5: "d \\minor", 6: "ees \\minor", 7: "e \\minor",
+    8: "f \\minor", 9: "fis \\minor", 10: "g \\minor", 11: "aes \\minor",
+}
+
+def transpose_key(tonalidade, shift):
+    """Transpõe a tonalidade LilyPond por 'shift' graus."""
+    if shift == 0:
+        return tonalidade
+    chromatic = KEY_CHROMATIC.get(tonalidade)
+    if chromatic is None:
+        return tonalidade
+    if abs(shift) == 7:
+        return tonalidade  # oitava = mesma tonalidade
+    semitones = _degree_shift_to_semitones(shift)
+    is_minor = "\\minor" in tonalidade
+    use_flats = shift < 0
+    new_chromatic = (chromatic + semitones + 12) % 12
+    if is_minor:
+        return (CHROMATIC_TO_MINOR_FLAT if use_flats else CHROMATIC_TO_MINOR_SHARP)[new_chromatic]
+    else:
+        return (CHROMATIC_TO_KEY_FLAT if use_flats else CHROMATIC_TO_KEY_SHARP)[new_chromatic]
+
+
+TRANSPOSE_INTERVALS = [
+    {"label": "+1 (2ª)", "value": 1},
+    {"label": "+2 (3ª)", "value": 2},
+    {"label": "+3 (4ª)", "value": 3},
+    {"label": "+4 (5ª)", "value": 4},
+    {"label": "+5 (6ª)", "value": 5},
+    {"label": "+6 (7ª)", "value": 6},
+    {"label": "+7 (8va)", "value": 7},
+    {"label": "−1 (2ª)", "value": -1},
+    {"label": "−2 (3ª)", "value": -2},
+    {"label": "−3 (4ª)", "value": -3},
+    {"label": "−4 (5ª)", "value": -4},
+    {"label": "−5 (6ª)", "value": -5},
+    {"label": "−6 (7ª)", "value": -6},
+    {"label": "−7 (8va)", "value": -7},
+]
+
+
+# ─────────────────────────── METADADOS NARRATIVOS DOS GRAUS ──────────────────
+# Hierarquia funcional + relação de parentesco (história de Krisicho)
+# Usado para análise fatorial da melodia e criação de narrativas
+
+GRAU_METADATA = {
+    1: {
+        "grau_romano": "I",
+        "nome_musical": "Tônica",
+        "funcao": "Principal, repouso, resolução",
+        "forma_rnfg": "círculo",
+        "cor": "#C0001A",
+        "nota": "Dó",
+        "personagem": "Protagonista",
+        "relacao": "Personagem central da história",
+        "arquetipo": "Herói/heroina",
+    },
+    2: {
+        "grau_romano": "II",
+        "nome_musical": "Supertônica",
+        "funcao": "Ponte, tensão leve",
+        "forma_rnfg": "ogiva",
+        "cor": "#ECD200",
+        "nota": "Ré",
+        "personagem": "Amiga da protagonista",
+        "relacao": "Companheira de aventuras, aliada",
+        "arquetipo": "Aliado",
+    },
+    3: {
+        "grau_romano": "III",
+        "nome_musical": "Mediante",
+        "funcao": "Caráter maior/menor, cor",
+        "forma_rnfg": "triângulo",
+        "cor": "#F07300",
+        "nota": "Mi",
+        "personagem": "Irmã mais nova da protagonista",
+        "relacao": "Jovem, curiosa, aprendiz",
+        "arquetipo": "Inocente",
+    },
+    4: {
+        "grau_romano": "IV",
+        "nome_musical": "Subdominante",
+        "funcao": "Abertura, acolhimento",
+        "forma_rnfg": "quadrado",
+        "cor": "#00B050",
+        "nota": "Fá",
+        "personagem": "Mãe da protagonista",
+        "relacao": "Protetora, sabedoria, origem",
+        "arquetipo": "Matriarca",
+    },
+    5: {
+        "grau_romano": "V",
+        "nome_musical": "Dominante",
+        "funcao": "Tensão máxima,驱动→tônica",
+        "forma_rnfg": "estrela",
+        "cor": "#0066FF",
+        "nota": "Sol",
+        "personagem": "Filha da velha da protagonista",
+        "relacao": "Nete/filha, gera conflito ou resolução",
+        "arquetipo": "Sombra/transformação",
+    },
+    6: {
+        "grau_romano": "VI",
+        "nome_musical": "Tônica Relativa",
+        "funcao": "Alternativa suave, empatia",
+        "forma_rnfg": "hexágono",
+        "cor": "#8B5E00",
+        "nota": "Lá",
+        "personagem": "Irmã mais velha da protagonista",
+        "relacao": "Protetora, experiência, guia",
+        "arquetipo": "Mentora",
+    },
+    7: {
+        "grau_romano": "VII",
+        "nome_musical": "Sensível",
+        "funcao": "Tensão aguda, resolução→tônica",
+        "forma_rnfg": "casinha",
+        "cor": "#9B5FC0",
+        "nota": "Si",
+        "personagem": "Irmã mais nova da protagonista",
+        "relacao": "Inquieta, busca, transformação",
+        "arquetipo": "Peregrino",
+    },
+}
+
+# Tabela para exibição (formato de lista ordenada)
+GRAU_METADATA_TABELA = [GRAU_METADATA[g] for g in range(1, 8)]
+
+# Mapeamento de personagem → grau (para busca inversa)
+PERSONAGEM_GRAU = {v["personagem"]: k for k, v in GRAU_METADATA.items()}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1231,17 +1645,57 @@ pre.logbox{
   <section class="editor" id="editorSection">
     <div class="resizer" id="resizer"></div>
     <div class="ed-col">
-    <div class="meta">
+    <div class="meta" style="grid-template-columns:1fr 72px 112px 112px 120px">
       <div><label>Título</label>
         <input id="titulo" value="Sem título" spellcheck="false"></div>
       <div><label>Compasso</label>
         <input id="compasso" value="2/4" spellcheck="false" oninput="atualizarInfo()"></div>
       <div><label>Modo</label>
         <select id="modo">
-          <option value="REAL">REAL (cores)</option>
-          <option value="FORMA">FORMA (preto)</option>
+          <option value="REAL">REAL — cores + formas fixas</option>
+          <option value="FORMA">FORMA — formas pretas</option>
+          <option value="REAL_NOTA">REAL NOTA — formas por tonalidade</option>
           <option value="STAFFLESS">Sem Pentagrama</option>
           <option value="TAB">Tab + Partitura 🎸</option>
+        </select>
+      </div>
+      <div><label>Tonalidade</label>
+        <select id="tonalidade">
+          <option value="c \major">C maior</option>
+          <option value="g \major">G maior</option>
+          <option value="d \major">D maior</option>
+          <option value="a \major">A maior</option>
+          <option value="e \major">E maior</option>
+          <option value="b \major">B maior</option>
+          <option value="fis \major">F# maior</option>
+          <option value="f \major">F maior</option>
+          <option value="bes \major">Bb maior</option>
+          <option value="ees \major">Eb maior</option>
+          <option value="aes \major">Ab maior</option>
+          <option value="des \major">Db maior</option>
+          <option value="a \minor">A menor</option>
+          <option value="e \minor">E menor</option>
+          <option value="b \minor">B menor</option>
+          <option value="fis \minor">F# menor</option>
+          <option value="cis \minor">C# menor</option>
+          <option value="g \minor">G menor</option>
+          <option value="d \minor">D menor</option>
+          <option value="c \minor">C menor</option>
+          <option value="f \minor">F menor</option>
+          <option value="bes \minor">Bb menor</option>
+          <option value="ees \minor">Eb menor</option>
+        </select>
+      </div>
+      <div><label>Clave</label>
+        <select id="clef">
+          <option value="G_2">Sol (linha 2)</option>
+          <option value="G_1">Sol (linha 1)</option>
+          <option value="F_4">Fá (linha 4)</option>
+          <option value="F_3">Fá (linha 3)</option>
+          <option value="C_3">Dó (linha 3) — Alto</option>
+          <option value="C_4">Dó (linha 4)</option>
+          <option value="C_2">Dó (linha 2)</option>
+          <option value="C_1">Dó (linha 1)</option>
         </select>
       </div>
     </div>
@@ -1284,6 +1738,7 @@ pre.logbox{
       <button class="btn" id="btnRun">Renderizar</button>
       <button class="btn g" id="btnPdf">PDF</button>
       <button class="btn g" onclick="exportLy()">Salvar .ly</button>
+      <button class="btn g" onclick="analiseFatorial()" title="Análise fatorial de incidência das notas">📊 Análise</button>
       <button class="btn danger" onclick="pedirLimpar()">Limpar</button>
       <span class="hint">⌘↵ · Undo ⌘Z</span>
     </div>
@@ -1848,6 +2303,65 @@ function exportLy(){
 }
 
 // ══════════════════════════════════════════════════════════
+//  ANÁLISE FATORIAL DE INCIDÊNCIA DAS NOTAS
+// ══════════════════════════════════════════════════════════
+async function analiseFatorial(){
+  const sintaxe = $('sintaxe').value.trim();
+  if(!sintaxe){ alert('Digite uma sintaxe primeiro.'); return; }
+  const tonalidade = $('tonalidade') ? $('tonalidade').value : 'c \\major';
+  try{
+    const r = await fetch('/analise',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sintaxe, tonalidade})
+    });
+    const d = await r.json();
+    if(!d.ok){ alert('Erro: '+d.erro); return; }
+    // Monta o relatório visual
+    let html = `<div style="font:13px var(--ui);padding:16px;max-width:700px">`;
+    html += `<h3 style="margin:0 0 12px;color:var(--ink)">📊 Análise Fatorial da Melodia</h3>`;
+    html += `<div style="font:11px var(--mono);color:var(--dim);margin-bottom:12px">`;
+    html += `Tonalidade: <b>${d.tonalidade}</b> · Total de notas: <b>${d.total_notas}</b></div>`;
+    html += `<table style="width:100%;border-collapse:collapse;font:12px var(--mono)">`;
+    html += `<tr style="border-bottom:2px solid var(--line);text-align:left">`;
+    html += `<th>Grau</th><th>Nota</th><th>Forma</th><th>Personagem</th><th>Incidência</th><th>%</th></tr>`;
+    for(const g of d.relatorio){
+      const barW = Math.max(2, g.percentual * 2);
+      html += `<tr style="border-bottom:1px solid var(--line)">`;
+      html += `<td style="color:${g.cor};font-weight:700">${g.grau_romano}</td>`;
+      html += `<td>${g.nota}</td>`;
+      html += `<td>${g.forma_rnfg}</td>`;
+      html += `<td style="font-size:11px">${g.personagem}</td>`;
+      html += `<td><span style="display:inline-block;width:${barW}px;height:12px;background:${g.cor};border-radius:2px;vertical-align:middle;margin-right:4px"></span>${g.incidencia}</td>`;
+      html += `<td>${g.percentual}%</td></tr>`;
+    }
+    html += `</table>`;
+    // Gráfico de barras horizontal
+    html += `<div style="margin-top:16px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px">`;
+    html += `<div style="font:10px var(--mono);color:var(--dim);margin-bottom:8px;text-transform:uppercase;letter-spacing:.1em">Distribuição</div>`;
+    for(const g of d.relatorio){
+      const barW = Math.max(2, g.percentual * 3);
+      html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">`;
+      html += `<span style="width:24px;font:11px var(--mono);color:${g.cor};font-weight:700">${g.grau_romano}</span>`;
+      html += `<span style="flex:1;background:var(--line);height:14px;border-radius:3px;overflow:hidden">`;
+      html += `<span style="display:block;width:${barW}%;height:100%;background:${g.cor};border-radius:3px"></span></span>`;
+      html += `<span style="width:60px;text-align:right;font:11px var(--mono);color:var(--dim)">${g.incidencia} (${g.percentual}%)</span>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+    html += `</div>`;
+    // Abre em modal
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay open';
+    overlay.innerHTML = `<div class="modal" style="max-width:700px;text-align:left;max-height:80vh;overflow:auto">${html}<div class="modal-btns" style="margin-top:16px"><button class="btn" onclick="this.closest('.overlay').remove()">Fechar</button></div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if(e.target===overlay) overlay.remove(); });
+  }catch(e){
+    alert('Erro na análise: '+e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
 //  LOG HISTÓRICO (H — novo v2.0.1)
 // ══════════════════════════════════════════════════════════
 function pushLog(msg, ok){
@@ -2048,6 +2562,8 @@ ta.addEventListener('keyup', atualizarComp);
 $('titulo').addEventListener('input',schedRender);
 $('compasso').addEventListener('input',schedRender);
 $('modo').addEventListener('change',render);
+$('clef').addEventListener('change',render);
+$('tonalidade').addEventListener('change',render);
 $('btnRun').addEventListener('click',render);
 $('btnPdf').addEventListener('click',()=>window.open('/pdf','_blank'));
 
@@ -2059,7 +2575,8 @@ async function render(){
     const r=await fetch('/render',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({sintaxe:s,modo:$('modo').value,
-        titulo:$('titulo').value,compasso:$('compasso').value})});
+        titulo:$('titulo').value,compasso:$('compasso').value,
+        tonalidade:$('tonalidade').value,clef:$('clef').value})});
     const d=await r.json();
     const pane=$('p-score');
     if(d.ok){
@@ -2853,6 +3370,10 @@ class Handler(BaseHTTPRequestHandler):
             else: self._send(404,"Nenhum PDF renderizado.","text/plain; charset=utf-8")
         elif self.path=="/clefs":
             self._send(200, json.dumps(_CLEF_CHOICES), "application/json; charset=utf-8")
+        elif self.path=="/metadata/graus":
+            self._send(200,json.dumps(GRAU_METADATA_TABELA,ensure_ascii=False),"application/json; charset=utf-8")
+        elif self.path=="/metadata/personagens":
+            self._send(200,json.dumps(PERSONAGEM_GRAU,ensure_ascii=False),"application/json; charset=utf-8")
         else: self._send(404,b"not found","text/plain")
 
     def do_POST(self):
@@ -2965,6 +3486,74 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(200,json.dumps({"ok":False,"erro":str(e)}),
                     "application/json; charset=utf-8")
+        elif p=="/transpose":
+            d=self._json()
+            sintaxe=d.get("sintaxe","")
+            shift=d.get("shift",0)
+            tonalidade=d.get("tonalidade","c \\major")
+            try:
+                nova_sintaxe=transpose_cromus(sintaxe, shift)
+                nova_tonalidade=transpose_key(tonalidade, shift)
+                self._send(200,json.dumps({
+                    "ok":True,
+                    "sintaxe":nova_sintaxe,
+                    "tonalidade":nova_tonalidade,
+                }),"application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200,json.dumps({"ok":False,"erro":str(e)}),
+                    "application/json; charset=utf-8")
+        elif p=="/transpose/intervals":
+            self._send(200,json.dumps(TRANSPOSE_INTERVALS),"application/json; charset=utf-8")
+        elif p=="/metadata/graus":
+            self._send(200,json.dumps(GRAU_METADATA_TABELA,ensure_ascii=False),"application/json; charset=utf-8")
+        elif p=="/metadata/personagem":
+            d=self._json()
+            nome=d.get("personagem","")
+            grau=PERSONAGEM_GRAU.get(nome)
+            if grau:
+                self._send(200,json.dumps({"ok":True,"grau":grau,**GRAU_METADATA[grau]},ensure_ascii=False),"application/json; charset=utf-8")
+            else:
+                self._send(200,json.dumps({"ok":False,"erro":f"Personagem '{nome}' não encontrado"}),"application/json; charset=utf-8")
+        elif p=="/analise":
+            d=self._json()
+            sintaxe=d.get("sintaxe","")
+            tonalidade=d.get("tonalidade","c \\major")
+            try:
+                # Parse da sintaxe e contagem de incidência
+                tokens = sintaxe.split()
+                contagem = {g: 0 for g in range(1, 8)}
+                total = 0
+                for tok in tokens:
+                    parsed = _parse_cromus_token(tok)
+                    if parsed and parsed["degree"] in contagem:
+                        contagem[parsed["degree"]] += 1
+                        total += 1
+                # Monta o relatório
+                relatorio = []
+                for g in range(1, 8):
+                    meta = GRAU_METADATA[g]
+                    count = contagem[g]
+                    percentual = (count / total * 100) if total > 0 else 0
+                    relatorio.append({
+                        "grau": g,
+                        "grau_romano": meta["grau_romano"],
+                        "nome_musical": meta["nome_musical"],
+                        "nota": meta["nota"],
+                        "forma_rnfg": meta["forma_rnfg"],
+                        "cor": meta["cor"],
+                        "personagem": meta["personagem"],
+                        "arquetipo": meta["arquetipo"],
+                        "incidencia": count,
+                        "percentual": round(percentual, 1),
+                    })
+                self._send(200,json.dumps({
+                    "ok":True,
+                    "total_notas": total,
+                    "tonalidade": tonalidade,
+                    "relatorio": relatorio,
+                },ensure_ascii=False),"application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200,json.dumps({"ok":False,"erro":str(e)}),"application/json; charset=utf-8")
         else:
             self._send(404,b"not found","text/plain")
 

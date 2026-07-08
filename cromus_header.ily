@@ -116,11 +116,15 @@
     cor))
 
 %%% ── DISPATCHER ─────────────────────────────────────────────
-%%% Dado grau (0–6) e modo ("REAL" ou "FORMA"), retorna o stencil
-#(define (get-stencil-cromus nota-idx modo)
+%%% Dado grau (0–6), índice de cor (0–6) e modo, retorna o stencil
+%%% nota-idx = índice da forma (grau)
+%%% cor-idx  = índice da cor (nota)
+%%% Em REAL_NOTA: forma=grau na escala, cor=nota absoluta
+%%% Em REAL/FORMA: nota-idx = cor-idx
+#(define (get-stencil-cromus nota-idx cor-idx modo)
   (let ((cor (if (string=? modo "FORMA")
                CROMUS_COR_PRETO
-               (cromus-cor nota-idx))))
+               (cromus-cor cor-idx))))
     (case nota-idx
       ((0) (make-circulo   cor))
       ((1) (make-ogiva     cor))
@@ -134,6 +138,7 @@
 %%% ── ENGRAVER FACTORY ────────────────────────────────────────
 %%% Uso: \new Staff \with { \consists #(cromus-engraver-factory "REAL") }
 %%%      \new Staff \with { \consists #(cromus-engraver-factory "FORMA") }
+%%%      \new Staff \with { \consists #(cromus-engraver-factory "REAL_NOTA") }
 #(define (cromus-engraver-factory modo)
   (lambda (context)
     (make-engraver
@@ -142,12 +147,30 @@
          (let* ((pitch (ly:event-property
                          (ly:grob-property grob 'cause)
                          'pitch))
-                (nota-idx (if (ly:pitch? pitch)
-                            (modulo (ly:pitch-notename pitch) 7)
-                            0)))
+                (note-name (if (ly:pitch? pitch)
+                             (modulo (ly:pitch-notename pitch) 7)
+                             0))
+                (nota-idx
+                  (if (string=? modo "REAL_NOTA")
+                    ;; REAL_NOTA: grau dentro da escala da tonalidade
+                    ;; obtém o tónico da assinatura de chave (keySignature)
+                    (let* ((ks (ly:context-property context 'keySignature))
+                           (tonic-name (if (pair? ks)
+                                         (ly:pitch-notename (car ks))
+                                         0)))
+                      (modulo (- note-name tonic-name) 7))
+                    ;; REAL / FORMA: grau absoluto da nota
+                    note-name))
+                (cor-idx
+                  (if (string=? modo "REAL_NOTA")
+                    ;; REAL_NOTA: cor = nota absoluta
+                    note-name
+                    ;; REAL / FORMA: cor = mesmo índice
+                    nota-idx)))
             (ly:grob-set-property! grob 'stencil
-              (get-stencil-cromus nota-idx modo))
+              (get-stencil-cromus nota-idx cor-idx modo))
             (ly:grob-set-property! grob 'layer -1)))))))
 
-cromusReal  = #(cromus-engraver-factory "REAL")
-cromusForma = #(cromus-engraver-factory "FORMA")
+cromusReal     = #(cromus-engraver-factory "REAL")
+cromusForma    = #(cromus-engraver-factory "FORMA")
+cromusRealNota = #(cromus-engraver-factory "REAL_NOTA")

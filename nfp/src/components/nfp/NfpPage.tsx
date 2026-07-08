@@ -299,7 +299,7 @@ export function NfpPage() {
   const isFree = user?.plan === "free";
   const exemplos = isFree ? EXEMPLOS_FREE : EXEMPLOS_PRO;
   const [sintaxe, setSintaxe] = useState(DEFAULT_SYNTAXE);
-  const [modo, setModo] = useState<"REAL" | "FORMA" | "STAFFLESS">("REAL");
+  const [modo, setModo] = useState<"REAL" | "FORMA" | "REAL_NOTA" | "STAFFLESS">("REAL");
   const [titulo, setTitulo] = useState("Sem título");
   const [compositor, setCompositor] = useState("");
   const [compasso, setCompasso] = useState("4/4");
@@ -600,6 +600,45 @@ export function NfpPage() {
     } catch { alert("WAV export not available yet"); }
   }, [sintaxe, titulo, compositor, compasso, tonalidade]);
 
+  const handleAnalise = useCallback(async () => {
+    if (!sintaxe.trim()) { alert("Digite uma sintaxe primeiro."); return; }
+    try {
+      const res = await fetch("http://localhost:4242/analise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sintaxe, tonalidade }),
+      });
+      const d = await res.json();
+      if (!d.ok) { alert("Erro: " + d.erro); return; }
+      // Monta o relatório visual
+      let html = `<div style="font:13px system-ui;padding:16px;max-width:700px">`;
+      html += `<h3 style="margin:0 0 12px">Análise Fatorial da Melodia</h3>`;
+      html += `<div style="font:11px monospace;color:#888;margin-bottom:12px">`;
+      html += `Tonalidade: <b>${d.tonalidade}</b> · Total de notas: <b>${d.total_notas}</b></div>`;
+      html += `<table style="width:100%;border-collapse:collapse;font:12px monospace">`;
+      html += `<tr style="border-bottom:2px solid #333;text-align:left">`;
+      html += `<th>Grau</th><th>Nota</th><th>Forma</th><th>Personagem</th><th>Incidência</th><th>%</th></tr>`;
+      for (const g of d.relatorio) {
+        const barW = Math.max(2, g.percentual * 2);
+        html += `<tr style="border-bottom:1px solid #333">`;
+        html += `<td style="color:${g.cor};font-weight:700">${g.grau_romano}</td>`;
+        html += `<td>${g.nota}</td>`;
+        html += `<td>${g.forma_rnfg}</td>`;
+        html += `<td style="font-size:11px">${g.personagem}</td>`;
+        html += `<td><span style="display:inline-block;width:${barW}px;height:12px;background:${g.cor};border-radius:2px;vertical-align:middle;margin-right:4px"></span>${g.incidencia}</td>`;
+        html += `<td>${g.percentual}%</td></tr>`;
+      }
+      html += `</table>`;
+      html += `</div>`;
+      // Abre em modal
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100";
+      overlay.innerHTML = `<div style="background:#1d2129;border:1px solid #333;border-radius:10px;padding:22px;max-width:720px;max-height:80vh;overflow:auto;text-align:left">${html}<div style="margin-top:16px;text-align:center"><button onclick="this.closest('div[style]').remove()" style="padding:6px 16px;border:1px solid #333;border-radius:6px;background:#20242d;color:#e8e6df;cursor:pointer">Fechar</button></div></div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    } catch (e: any) { alert("Erro na análise: " + e.message); }
+  }, [sintaxe, tonalidade]);
+
   const handleImport = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -734,13 +773,14 @@ export function NfpPage() {
 
         <div className="w-px h-6" style={{ background: vars["--border"] }} />
 
-        <select value={modo} onChange={(e) => setModo(e.target.value as "REAL" | "FORMA" | "STAFFLESS")}
+        <select value={modo} onChange={(e) => setModo(e.target.value as "REAL" | "FORMA" | "REAL_NOTA" | "STAFFLESS")}
           className="px-2 py-1 rounded border text-sm"
           style={{ background: vars["--bg"], color: vars["--text"], borderColor: vars["--border"] }}
         >
-          <option value="REAL">REAL</option>
-          <option value="FORMA">FORMA</option>
-          <option value="STAFFLESS">STAFFLESS</option>
+          <option value="REAL">REAL — cores + formas fixas</option>
+          <option value="FORMA">FORMA — formas pretas</option>
+          <option value="REAL_NOTA">REAL NOTA — formas por tonalidade</option>
+          <option value="STAFFLESS">Sem Pentagrama</option>
         </select>
 
         <select value={clef} onChange={(e) => setClef(e.target.value)}
@@ -868,6 +908,11 @@ export function NfpPage() {
           className="px-3 py-1 text-sm font-medium rounded"
           style={{ background: vars["--bg"], color: vars["--text"], border: `1px solid ${vars["--border"]}` }}
         >🔊 WAV</button>
+
+        <button onClick={handleAnalise}
+          className="px-3 py-1 text-sm font-medium rounded"
+          style={{ background: vars["--bg"], color: vars["--text"], border: `1px solid ${vars["--border"]}` }}
+        >📊 Análise</button>
 
         <button onClick={handleExportLy}
           className="px-3 py-1 text-sm font-medium rounded"
