@@ -166,6 +166,7 @@ Por isso o studio gera `notas_ly_raw` direto e NÃO usa o `_converter_notas`.
 - Último compasso: tamanho normal, não esticar
 - Barra final: `\bar "|."`
 - Ogiva do Ré (Grau II): escala horizontal 0.75
+- **Clave (decisão 2026-07-08):** mudar de clave NÃO transpõe a música. A FORMA é fixa por grau e o engraver a deriva da ALTURA REAL da nota; portanto Dó é sempre círculo (vermelho), Lá sempre hexágono, etc., em qualquer clave. Trocar a clave apenas muda o símbolo/posição no pentagrama (LilyPond reposiciona as mesmas alturas). Nunca reescrever os graus em função da clave.
 
 ---
 
@@ -204,6 +205,7 @@ Por isso o studio gera `notas_ly_raw` direto e NÃO usa o `_converter_notas`.
 | `\| 'q'` (KeyError) | durações w/h/q/e do studio ≠ m/s/c do pipeline | mapear via `notas_ly_raw` |
 | Arquivo reduzido a 104 linhas | Claude Code reescreveu o arquivo inteiro e estourou 32k tokens | usar str_replace pequenos; restaurar do backup |
 | Painel some / layout quebra | regra CSS `.spanel.open` duplicada conflitando | remover regra antiga `transform:translateX` |
+| Grau 1 (Dó) vira hexágono (Lá) ao mudar de clave | `_transpor_sintaxe_para_clef` transpunha os graus "para manter posição visual", mudando a altura real e, com ela, a FORMA (derivada da altura pelo engraver) | mudar de clave é NO-OP na música: só troca o glifo da clave (`_gerar_clef_override`), preservando alturas e formas. 2026-07-08 |
 
 ---
 

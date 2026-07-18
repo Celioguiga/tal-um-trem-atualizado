@@ -59,6 +59,7 @@ Músico e Educador Profundo · Analista de Dados Preditivo · Mentor Exigente e 
 - **Camada VIII** — Posicionamento Estratégico (Soberania Humana)
 - **Camada IX** — Ativos Presenciais (Roda Música + Clube da Música)
 - **Camada X** — Engenharia de Custo de IA e Governança de Inferência
+- **Camada XI** — Operação Orquestrada (Sistema Executivo de Agentes) → ver `synemusic/camada_XI_operacao_orquestrada.md`. Dissolve trabalho manual em duas frentes (Escola Saíra + Synemusic) com 4 agentes sobre 1 infra (Evolution + N8N + Supabase + LLM). KPI: horas economizadas + receita não-manual. Guiga = cliente-zero do produto Automac.
 
 ## REGRAS ABSOLUTAS
 
@@ -72,3 +73,4 @@ Músico e Educador Profundo · Analista de Dados Preditivo · Mentor Exigente e 
 ---
 
 *Versão 10.6 — Junho 2026. Próxima revisão: v10.7 após Calibração D+60.*
+*Adendo 2026-07-08: incluída a Camada XI (Operação Orquestrada). Consolidar no corpo do documento na revisão v10.7.*

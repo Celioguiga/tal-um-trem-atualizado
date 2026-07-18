@@ -162,19 +162,27 @@ def _calcular_semitons_transposicao(steps, tonalidade="c \\major"):
     return semitons
 
 def _transpor_sintaxe_para_clef(sintaxe, clef_origem, clef_destino):
-    """Mudar de clave NÃO transpõe a música (no-op por design).
-
-    RNFG: a FORMA é fixa por grau e o engraver a deriva da ALTURA REAL da nota.
-    A implementação antiga transpunha os graus "para manter a posição visual",
-    o que mudava a altura e, com ela, a forma desenhada — fazendo Dó (grau 1,
-    círculo) virar Lá (hexágono) em C_2, por exemplo.
-
-    O correto (e o que uma clave faz de fato): manter as MESMAS alturas e apenas
-    trocar o símbolo da clave; o LilyPond reposiciona as notas no pentagrama.
-    Assim Dó continua Dó (círculo, vermelho) em qualquer clave. A troca do glifo
-    da clave é feita por _gerar_clef_override/_CLEF_LILYNAME, independente disto.
+    """Transpõe a sintaxe para manter a posição visual ao mudar de clave.
+    
+    Quando mudamos de clave (ex: G_2 para C_3), as notas precisam ser
+    transpostas para manter a mesma posição visual no pentagrama.
+    
+    Exemplo: Em clave de sol, Dó (grau 1) está na primeira linha debaixo.
+             Em clave de dó (alto), Dó precisa subir 2 posições para
+             ficar na terceira linha (onde a clave de dó indica o Dó).
     """
-    return sintaxe
+    if clef_origem == clef_destino:
+        return sintaxe
+    
+    steps_origem = _CLEF_TRANSPOSE_STEPS.get(clef_origem, 0)
+    steps_destino = _CLEF_TRANSPOSE_STEPS.get(clef_destino, 0)
+    steps_diff = steps_destino - steps_origem
+    
+    if steps_diff == 0:
+        return sintaxe
+    
+    # Usa a função de transposição existente
+    return transpose_cromus(sintaxe, steps_diff)
 
 
 # Mapeamento nota→índice diatônico (0=C, 1=D, ..., 6=B)
@@ -479,12 +487,9 @@ def _converter_tempo(grupo):
                 tie_idx.add(len(clean_raw) - 1)
                 tie_pending = False
     clean_g = ' '.join(clean_raw)
-    # Cola ao token anterior os asteriscos escritos com espaço ("5 * * *" → "5***"),
-    # SEM remover os demais espaços (senão o apóstrofo de "'1" grudaria na nota anterior).
-    clean_g = _re.sub(r'\s+\*', '*', clean_g)
 
     # Regex aceita apóstrofo à ESQUERDA (oitava abaixo), à direita (acima) e acidentes #/b.
-    # NÃO remover os outros espaços: isso colaria o apóstrofo de '1 na nota anterior.
+    # NÃO remover espaços: isso colaria o apóstrofo de '1 na nota anterior.
     tokens = _re.findall(r"'*[0-7]['#b]*\{[^}]*\}\**|'*[0-7]['#b]*[*whqestin.]+|-\*+|'*[0-7]['#b]*|-|0[whqestin.]+", clean_g)
     notas = []
     for t in tokens:
@@ -524,33 +529,6 @@ def _converter_tempo(grupo):
         return '\\tuplet ' + frac + ' { ' + inner + ' }'
     return inner
 
-# Duração LilyPond → tempos (unidade = semínima/quarter)
-_DUR_Q = {'1':4.0, '2':2.0, '4':1.0, '8':0.5, '16':0.25, '32':0.125, '64':0.0625}
-_NOTE_DUR_RE = re.compile(r"(?:[a-g](?:is|es)*[,']*|r|R|s)(\d+)(\.*)")
-
-def _beats_flat(s):
-    """Soma os tempos de notas/pausas simples (sem quiálteras)."""
-    total = 0.0
-    for m in _NOTE_DUR_RE.finditer(s):
-        base = _DUR_Q.get(m.group(1))
-        if base is None:
-            continue
-        dots = len(m.group(2))
-        total += base * (2 - 0.5 ** dots)  # ponto(s): 1→1.5, 2→1.75
-    return total
-
-def _beats_de_ly(ly):
-    """Tempos reais (em semínimas) de um trecho LilyPond, tratando \\tuplet."""
-    if not ly:
-        return 0.0
-    total = 0.0
-    for m in re.finditer(r'\\tuplet\s+(\d+)/(\d+)\s*\{([^{}]*)\}', ly):
-        n, d = int(m.group(1)), int(m.group(2))
-        total += _beats_flat(m.group(3)) * d / n
-    resto = re.sub(r'\\tuplet\s+\d+/\d+\s*\{[^{}]*\}', '', ly)
-    total += _beats_flat(resto)
-    return total
-
 def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80, tonalidade="c \\major"):
     s = sintaxe
     s = s.replace('`', "'")
@@ -577,11 +555,10 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
         bs = compasso.split('(')[1].rstrip(')').strip()
         beat_struct = ' ' + bs
     num, denom = comp_base.split('/')
-    # Tempos por compasso em unidade de semínima (ex.: 3/4→3, 4/4→4, 6/8→3, 2/2→4)
-    beats_por_compasso = int(num) * 4.0 / int(denom)
+    tempos_por_compasso = int(num)
     grupos = s.split(',')
     partes = []
-    cont_tempo = 0.0
+    cont_tempo = 0
     cont_compasso = 0
     # Tabela de conversao placeholder → LilyPond
     LILY_MARKS = {
@@ -607,12 +584,10 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
             continue
         ly = _converter_tempo(g)
         partes.append(ly)
-        cont_tempo += _beats_de_ly(ly)  # tempos REAIS do grupo (mínima=2, pontuada, etc.)
-        if cont_tempo >= beats_por_compasso - 1e-6:
+        cont_tempo += 1
+        if cont_tempo >= tempos_por_compasso:
             partes.append('|')
-            cont_tempo -= beats_por_compasso
-            if cont_tempo < 1e-6:
-                cont_tempo = 0.0
+            cont_tempo = 0
             cont_compasso += 1
             if cont_compasso % compassos_por_linha == 0:
                 partes.append('\\break')

@@ -80,6 +80,31 @@ mkdir -p ~/backups_studio && cp ~/cromus_studio.py ~/backups_studio/cromus_studi
 **Ciclo de aprendizado do sistema:**
 render → dúvida/erro → aba Diálogo (editor propõe interpretações OU Guiga dita a correção) → decisão aplicada e registrada no caderno → correções recorrentes são promovidas a regra na Bíblia → tradutor é atualizado conforme a Bíblia.
 
+## 8-0. HANDOFF DA SESSÃO 2026-07-08 (LER PRIMEIRO)
+
+> Sessão feita no OpenCode; continuidade no Claude Code. Estado atual do trabalho:
+
+**Bugs corrigidos no `cromus_studio.py` (valem para Studio 4242 e NFP 5173 — mesmo backend via proxy):**
+1. **Oitava abaixo `'5`** — tokenizador de `_converter_tempo` não aceitava apóstrofo à esquerda nem acidentes `#/b`; adicionada normalização de apóstrofos curvos (macOS U+2019 → U+0027).
+2. **`'7` sumia ao mudar de clave** — `transpose_cromus`/`_parse_cromus_token` não reconheciam apóstrofo curvo nem notas grudadas em vírgula/parênteses; quebra ampliada para `[\s,|()]+` + normalização.
+3. **Grau 1 (Dó) virava hexágono ao mudar de clave (ESTRUTURAL)** — `_transpor_sintaxe_para_clef` agora é **NO-OP**: mudar de clave só troca o glifo, preserva altura/forma. Regra registrada na Bíblia seção 5.
+4. **Ritmo `5 * * * 4 *`** (colcheia pontuada) — regressão do fix 1; agora cola só os asteriscos ao token anterior (`re.sub(r'\s+\*','*')`).
+5. **Compasso 3/4 (e 6/8)** — barra de compasso passou a contar TEMPOS REAIS via `_beats_de_ly`/`_beats_flat` contra `beats_por_compasso = num*4/denom` (trata mínima, ponto, quiáltera).
+Tudo validado compilando no LilyPond; registrado em `correcoes_sintaxe.md`. Backups em `backups_studio/`.
+
+**Camada XI — Operação Orquestrada (negócio):** doc canônico em `synemusic/camada_XI_operacao_orquestrada.md`; Camada XI adicionada ao Prompt Mestre (adendo, consolidar em v10.7).
+
+**Trabalho na pasta `n8n/` (ATENÇÃO: está no `.gitignore`, não versionado):**
+- Cadeia de migrações reconciliada: `000_base_crm_atendimento.sql` → `002` (sem `mensagens` duplicada) → `003_extensao_saira.sql` (turmas/matriculas + trigger guarda-inegociáveis + views `v_vagas`/`v_painel_saira`) → `004_rpc_gravar_mensagem.sql`.
+- Workflow `workflow_atendimento_v2.json`: nós de gravação passam a chamar `rpc/gravar_mensagem` (corrige P-1 de verdade — o insert antigo não mandava `contato_id`). Backup `.bak_*` na mesma pasta.
+- **Validação pendente:** rodar as migrações no Supabase e reimportar o workflow no N8N (não há Postgres/N8N local).
+
+**Pendências levantadas pelo Guiga (aguardando conteúdo):** trecho de sintaxe onde a **ligadura** falha; **lista de assuntos do NFP**.
+
+**Git:** raiz = HOME (`~`), branch `main`. Rastreados e modificados: `cromus_studio.py`, `biblia_cromus.md`, `correcoes_sintaxe.md`, `prompt_mestre_synemusic_v10.6.md`, `CLAUDE.md` + novo `synemusic/camada_XI_operacao_orquestrada.md`. `n8n/`, `Downloads/`, `Library/`, `Documents/`, `.anthropic_env` estão no `.gitignore`. Sugestão: commit dos fixes do Cromus (1) e da Camada XI (2) separadamente; `backups_studio/` idealmente no `.gitignore`.
+
+---
+
 ## 8. ESTADO ATUAL (2026-07-03)
 
 **Implementado em 14/06 (Cromus Studio v2.1):**
