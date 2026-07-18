@@ -55,3 +55,8 @@ nfp/*.tsbuildinfo
 *.key
 id_*
 !/rng_common.py
+!/campanhas/
+!/campanhas/**
+!/references/
+!/references/**
+!/packager.py
