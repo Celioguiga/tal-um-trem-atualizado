@@ -1,0 +1,180 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// --- Autenticação ---------------------------------------------------------
+
+model Usuario {
+  id           String   @id @default(cuid())
+  nome         String
+  email        String   @unique
+  senhaHash    String
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+}
+
+// --- Cadastro base ----------------------------------------------------------
+
+model Turma {
+  id           String   @id @default(cuid())
+  nome         String
+  anoLetivo    Int
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  alunos      Aluno[]
+  horarios    Horario[]
+  planosDeAula PlanoDeAula[]
+  avaliacoes  Avaliacao[]
+  musicas     Musica[]
+}
+
+model Aluno {
+  id           String    @id @default(cuid())
+  nome         String
+  dataNasc     DateTime?
+  responsavel  String?
+  contato      String?
+  observacoesGerais String?
+  criadoEm     DateTime  @default(now())
+  atualizadoEm DateTime  @updatedAt
+
+  turmaId String
+  turma   Turma  @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+
+  faltas       Falta[]
+  notas        Nota[]
+  observacoes  Observacao[]
+}
+
+model Epoca {
+  id           String   @id @default(cuid())
+  titulo       String
+  tema         String?
+  dataInicio   DateTime
+  dataFim      DateTime
+  descricao    String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  planosDeAula PlanoDeAula[]
+  avaliacoes   Avaliacao[]
+  musicas      Musica[]
+}
+
+model Horario {
+  id           String   @id @default(cuid())
+  diaSemana    Int      // 0 = domingo ... 6 = sábado
+  horaInicio   String   // "HH:mm"
+  horaFim      String   // "HH:mm"
+  local        String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  turmaId String
+  turma   Turma  @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+}
+
+// --- Planejamento e conhecimento pedagógico (schema pronto, UI futura) ------
+
+model PlanoDeAula {
+  id           String   @id @default(cuid())
+  titulo       String
+  data         DateTime
+  objetivos    String?
+  conteudo     String?
+  materiais    String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  turmaId String
+  turma   Turma  @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+
+  epocaId String?
+  epoca   Epoca?  @relation(fields: [epocaId], references: [id], onDelete: SetNull)
+}
+
+model ConhecimentoArtigo {
+  id           String   @id @default(cuid())
+  titulo       String
+  categoria    String?
+  conteudo     String
+  tags         String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+}
+
+// --- Registros do dia a dia ------------------------------------------------
+
+model Falta {
+  id       String   @id @default(cuid())
+  data     DateTime
+  justificada Boolean @default(false)
+  motivo   String?
+
+  alunoId String
+  aluno   Aluno  @relation(fields: [alunoId], references: [id], onDelete: Cascade)
+}
+
+model Nota {
+  id          String   @id @default(cuid())
+  data        DateTime
+  conceito    String?
+  valor       Float?
+  observacao  String?
+
+  alunoId String
+  aluno   Aluno  @relation(fields: [alunoId], references: [id], onDelete: Cascade)
+}
+
+model Observacao {
+  id        String   @id @default(cuid())
+  data      DateTime @default(now())
+  conteudo  String
+
+  alunoId String
+  aluno   Aluno  @relation(fields: [alunoId], references: [id], onDelete: Cascade)
+}
+
+model Avaliacao {
+  id           String   @id @default(cuid())
+  titulo       String
+  data         DateTime
+  instrucoes   String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  turmaId String
+  turma   Turma  @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+
+  epocaId String?
+  epoca   Epoca?  @relation(fields: [epocaId], references: [id], onDelete: SetNull)
+}
+
+// --- Banco de músicas / RNFG -------------------------------------------------
+
+model Musica {
+  id            String   @id @default(cuid())
+  titulo        String
+  autor         String?
+  notacaoCromus String?  // sintaxe Cromus (graus numéricos)
+  lilypond      String?  // código LilyPond gerado
+  partituraPdf  String?  // caminho/URL do PDF gerado
+  observacoes   String?
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  turmaId String?
+  turma   Turma?  @relation(fields: [turmaId], references: [id], onDelete: SetNull)
+
+  epocaId String?
+  epoca   Epoca?  @relation(fields: [epocaId], references: [id], onDelete: SetNull)
+}
