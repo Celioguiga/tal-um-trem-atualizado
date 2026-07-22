@@ -8,10 +8,10 @@ const modulosAtivos = [
   { href: "/alunos", label: "Alunos" },
   { href: "/epocas", label: "Épocas" },
   { href: "/horarios", label: "Horários" },
+  { href: "/planejamento", label: "Planejamento" },
 ];
 
 const modulosEmBreve = [
-  "Planejamento de aula",
   "Notas, faltas e observações",
   "Avaliações",
   "Banco de músicas (RNFG)",
