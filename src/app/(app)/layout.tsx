@@ -10,10 +10,10 @@ const modulosAtivos = [
   { href: "/horarios", label: "Horários" },
   { href: "/planejamento", label: "Planejamento" },
   { href: "/registros", label: "Registros" },
+  { href: "/avaliacoes", label: "Avaliações" },
 ];
 
 const modulosEmBreve = [
-  "Avaliações",
   "Banco de músicas (RNFG)",
   "Conhecimento Waldorf",
 ];
