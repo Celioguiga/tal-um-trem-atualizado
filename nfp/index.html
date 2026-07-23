@@ -1,17 +1,348 @@
-<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Note Form Pro — Synemusic</title>
-    <meta name="theme-color" content="#141009" />
-    <meta name="description" content="A música que se vê. Editor de partituras RNFG — Real Nota Forma Grau." />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Note Form Pro — CROMUS Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #f5f5f7; color: #1d1d1f; line-height: 1.6; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { margin-bottom: 32px; }
+        h1 { font-size: 32px; font-weight: 600; margin-bottom: 8px; }
+        .subtitle { color: #666; font-size: 16px; }
+        .legend { display: flex; gap: 12px; flex-wrap: wrap; padding: 16px; background: white; border-radius: 12px; border: 1px solid #e5e5e7; margin-bottom: 20px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+        .legend-dot { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.1); flex-shrink: 0; }
+        
+        .auth-bar { background: white; padding: 12px 16px; border-radius: 12px; border: 1px solid #e5e5e7; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .auth-form { display: flex; gap: 8px; }
+        .auth-form input { padding: 8px 12px; border: 1px solid #d0d0d5; border-radius: 6px; font-size: 13px; }
+        .auth-form input:focus { outline: none; border-color: #0071e3; }
+        .user-info { font-size: 13px; color: #666; }
+        
+        .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .panel { background: white; border-radius: 12px; padding: 20px; border: 1px solid #e5e5e7; display: flex; flex-direction: column; }
+        .panel h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+        
+        textarea { width: 100%; height: 320px; padding: 12px; font-family: 'Menlo', 'Monaco', monospace; font-size: 13px; border: 1px solid #d0d0d5; border-radius: 6px; resize: vertical; background: #fafbfc; }
+        textarea:focus { outline: none; border-color: #0071e3; background: white; }
+        
+        .toolbar { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+        button { padding: 10px 16px; border: none; border-radius: 6px; background: #0071e3; color: white; cursor: pointer; font-weight: 500; font-size: 13px; transition: background 200ms; }
+        button:hover { background: #0066cc; }
+        button:active { scale: 0.98; }
+        button.secondary { background: #f5f5f7; color: #1d1d1f; border: 1px solid #d0d0d5; }
+        button.secondary:hover { background: #e8e8ed; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .output { background: #fafbfc; border: 1px solid #d0d0d5; border-radius: 6px; padding: 16px; min-height: 320px; overflow: auto; display: flex; align-items: center; justify-content: center; }
+        .output svg { max-width: 100%; height: auto; }
+        .output-placeholder { color: #a1a1a6; font-size: 14px; }
+        
+        .errors { color: #d70015; font-size: 12px; margin-top: 8px; max-height: 80px; overflow-y: auto; padding: 8px; background: #fff5f5; border-radius: 4px; }
+        .errors:empty { display: none; }
+        
+        .help { background: white; border: 1px solid #e5e5e7; border-radius: 12px; padding: 16px; margin-top: 20px; font-size: 13px; color: #666; }
+        .help strong { display: block; margin-bottom: 8px; color: #1d1d1f; }
+        code { background: #f5f5f7; padding: 2px 6px; border-radius: 4px; font-family: 'Menlo', 'Monaco', monospace; color: #0071e3; }
+        
+        @media (max-width: 900px) {
+            .main-grid { grid-template-columns: 1fr; }
+            h1 { font-size: 24px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 Note Form Pro</h1>
+            <p class="subtitle">CROMUS Editor + RNG Visualization + Audio Playback</p>
+        </header>
+
+        <div class="auth-bar">
+            <div id="auth-ui"></div>
+            <div class="user-info" id="user-info" style="display:none;">
+                Logged in as <strong id="user-email"></strong>
+            </div>
+        </div>
+
+        <div class="legend" id="legend"></div>
+
+        <div class="main-grid">
+            <div class="panel">
+                <h3>CROMUS Notation</h3>
+                <textarea id="input" placeholder="METRICA 4
+1 , 1 , 5 , 5 |
+6 , 6 , 5 , - |
+4 , 4 , 3 , 3 |
+2 , 2 , 1 , - |||">METRICA 4
+1 , 1 , 5 , 5 |
+6 , 6 , 5 , - |
+4 , 4 , 3 , 3 |
+2 , 2 , 1 , - |||</textarea>
+                <div class="toolbar">
+                    <button onclick="renderNotation()" title="Render notation to RNG shapes">▶ Render RNG</button>
+                    <button class="secondary" onclick="playAudio()" title="Play audio notes with Tone.js">🔊 Play</button>
+                    <button class="secondary" onclick="downloadSVG()" title="Download visualization as SVG">↓ SVG</button>
+                    <button class="secondary" onclick="saveToDB()" title="Save to database" id="save-btn">💾 Save</button>
+                </div>
+                <div class="errors" id="errors"></div>
+            </div>
+
+            <div class="panel">
+                <h3>Nota Forma Grau</h3>
+                <div class="output" id="output">
+                    <span class="output-placeholder">Click "Render RNG" to visualize</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="help">
+            <strong>Quick reference:</strong> 
+            Notes <code>1</code>-<code>7</code> (Dó-Si) · 
+            Beats separated by comma <code>,</code> · 
+            Bars <code>|</code> · 
+            Rest <code>-</code> · 
+            Octave <code>1'</code> (up) · 
+            Accidental <code>3#</code> <code>3b</code> · 
+            Chord <code>ACORDE(1 3 5)</code>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.hostname === 'localhost' 
+            ? "http://localhost:8000/api" 
+            : "/api";
+
+        const RNG_MAP = {
+            1: {note:"Dó", shape:"circle", color:"#D9534F", emotion:"Amor"},
+            2: {note:"Ré", shape:"eye", color:"#F0AD4E", emotion:"Alegria"},
+            3: {note:"Mi", shape:"triangle", color:"#F89406", emotion:"Criatividade"},
+            4: {note:"Fá", shape:"square", color:"#6BCB77", emotion:"Paz"},
+            5: {note:"Sol", shape:"star", color:"#4D96FF", emotion:"Esperança"},
+            6: {note:"Lá", shape:"hexagon", color:"#DAA520", emotion:"Sabedoria"},
+            7: {note:"Si", shape:"pentagon", color:"#9B59B6", emotion:"Transcendência"},
+        };
+
+        let currentUser = null;
+        let accessToken = null;
+
+        // === Auth UI ===
+        function buildLegend() {
+            const legend = document.getElementById("legend");
+            legend.innerHTML = "";
+            for (const [k, v] of Object.entries(RNG_MAP)) {
+                legend.innerHTML += `<div class="legend-item">
+                    <div class="legend-dot" style="background:${v.color}"></div>
+                    <span>${k} ${v.note} (${v.emotion})</span>
+                </div>`;
+            }
+        }
+
+        function renderAuthUI() {
+            const authUI = document.getElementById("auth-ui");
+            const saveBtn = document.getElementById("save-btn");
+            if (currentUser) {
+                authUI.innerHTML = `<button class="secondary" onclick="logout()">Logout</button>`;
+                document.getElementById("user-info").style.display = "block";
+                document.getElementById("user-email").textContent = currentUser.email;
+                saveBtn.disabled = false;
+            } else {
+                authUI.innerHTML = `
+                    <div class="auth-form">
+                        <input id="email" type="email" placeholder="email@example.com">
+                        <input id="password" type="password" placeholder="password">
+                        <button class="secondary" onclick="register()">Register</button>
+                        <button onclick="login()">Login</button>
+                    </div>
+                `;
+                document.getElementById("user-info").style.display = "none";
+                saveBtn.disabled = true;
+            }
+        }
+
+        async function register() {
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            if (!email || !password) return alert("Please fill all fields");
+            try {
+                const resp = await fetch(`${API_BASE}/auth/register`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({email, password})
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    alert("✅ Registration successful! Check your email.");
+                } else {
+                    alert(`❌ Error: ${data.detail}`);
+                }
+            } catch (e) {
+                alert(`❌ Error: ${e.message}`);
+            }
+        }
+
+        async function login() {
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            if (!email || !password) return alert("Please fill all fields");
+            try {
+                const resp = await fetch(`${API_BASE}/auth/login`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({email, password})
+                });
+                if (!resp.ok) {
+                    alert("❌ Invalid credentials");
+                    return;
+                }
+                const data = await resp.json();
+                accessToken = data.access_token;
+                currentUser = {id: data.user_id, email: data.email};
+                renderAuthUI();
+                alert("✅ Logged in!");
+                document.getElementById("email").value = "";
+                document.getElementById("password").value = "";
+            } catch (e) {
+                alert(`❌ Error: ${e.message}`);
+            }
+        }
+
+        function logout() {
+            currentUser = null;
+            accessToken = null;
+            renderAuthUI();
+            alert("Logged out");
+        }
+
+        // === Parser & Renderer ===
+        function parseCROMUS(source) {
+            const tokens = [];
+            const lines = source.trim().split('\n');
+            for (const line of lines) {
+                const clean = line.split('//')[0].trim();
+                if (!clean) continue;
+                const noteMatches = clean.match(/[1-7]/g);
+                if (noteMatches) {
+                    for (const match of noteMatches) {
+                        tokens.push({type:"note", degree:parseInt(match)});
+                    }
+                }
+                if (clean.includes('-') && !noteMatches) {
+                    tokens.push({type:"rest"});
+                }
+            }
+            return tokens;
+        }
+
+        function drawShape(x, y, r, shape, color) {
+            const stroke = 'stroke="rgba(0,0,0,0.2)" stroke-width="1"';
+            if (shape === "circle") return `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" ${stroke}/>`;
+            if (shape === "eye") return `<path d="M ${x-r} ${y} Q ${x} ${y-r*1.2} ${x+r} ${y} Q ${x} ${y+r*1.2} ${x-r} ${y} Z" fill="${color}" ${stroke}/>`;
+            if (shape === "triangle") { const h = r * 1.8; return `<polygon points="${x},${y-h/2} ${x-r},${y+h/2} ${x+r},${y+h/2}" fill="${color}" ${stroke}/>`; }
+            if (shape === "square") { const s = r * 1.4; return `<rect x="${x-s/2}" y="${y-s/2}" width="${s}" height="${s}" fill="${color}" ${stroke}/>`; }
+            if (shape === "star") {
+                const pts = [];
+                for (let i = 0; i < 10; i++) { const rad = i % 2 === 0 ? r : r * 0.4; const angle = (Math.PI * 2 / 10) * i - Math.PI / 2; pts.push(`${x + rad * Math.cos(angle)},${y + rad * Math.sin(angle)}`); }
+                return `<polygon points="${pts.join(' ')}" fill="${color}" ${stroke}/>`;
+            }
+            if (shape === "hexagon" || shape === "pentagon") {
+                const sides = shape === "hexagon" ? 6 : 5;
+                const pts = [];
+                for (let i = 0; i < sides; i++) { const angle = (Math.PI * 2 / sides) * i - Math.PI / 2; pts.push(`${x + r * Math.cos(angle)},${y + r * Math.sin(angle)}`); }
+                return `<polygon points="${pts.join(' ')}" fill="${color}" ${stroke}/>`;
+            }
+            return `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" ${stroke}/>`;
+        }
+
+        function renderToSVG(tokens) {
+            const noteEvents = tokens.filter(t => t.type === "note" || t.type === "rest");
+            if (!noteEvents.length) return '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="50%" y="50%" text-anchor="middle" fill="gray">No notes</text></svg>';
+            const spacing = 70; const margin = 40; const shapeR = 24; const h = 160; const w = margin * 2 + Math.max(noteEvents.length, 1) * spacing; const cy = h / 2;
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="background:white;">`;
+            svg += `<line x1="${margin}" y1="${cy + shapeR + 8}" x2="${w - margin}" y2="${cy + shapeR + 8}" stroke="rgba(0,0,0,0.1)" stroke-width="0.5"/>`;
+            for (let i = 0; i < noteEvents.length; i++) {
+                const evt = noteEvents[i]; const cx = margin + i * spacing;
+                if (evt.type === "rest") {
+                    svg += `<line x1="${cx-10}" y1="${cy}" x2="${cx+10}" y2="${cy}" stroke="rgba(0,0,0,0.3)" stroke-width="2" stroke-linecap="round"/>`;
+                    continue;
+                }
+                const rng = RNG_MAP[evt.degree] || RNG_MAP[1];
+                svg += drawShape(cx, cy, shapeR, rng.shape, rng.color);
+                svg += `<text x="${cx}" y="${cy + 7}" text-anchor="middle" font-size="12" font-weight="bold" fill="white">${evt.degree}</text>`;
+                svg += `<text x="${cx}" y="${cy + shapeR + 22}" text-anchor="middle" font-size="11" fill="rgba(0,0,0,0.6)">${rng.note}</text>`;
+            }
+            svg += '</svg>';
+            return svg;
+        }
+
+        function renderNotation() {
+            const input = document.getElementById("input").value;
+            const tokens = parseCROMUS(input);
+            const svg = renderToSVG(tokens);
+            document.getElementById("output").innerHTML = svg;
+        }
+
+        async function playAudio() {
+            const input = document.getElementById("input").value;
+            const tokens = parseCROMUS(input);
+            const notes = tokens.filter(t => t.type === "note").map(t => t.degree);
+            if (!notes.length) return alert("No notes to play");
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: {type: "triangle"},
+                envelope: {attack: 0.005, decay: 0.1, sustain: 0.3, release: 0.2},
+            }).toDestination();
+            const baseFreqs = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88];
+            const now = Tone.now();
+            for (let i = 0; i < notes.length; i++) {
+                const freq = baseFreqs[notes[i] - 1];
+                synth.triggerAttackRelease(freq, "0.5", now + i * 0.5);
+            }
+        }
+
+        function downloadSVG() {
+            const input = document.getElementById("input").value;
+            const tokens = parseCROMUS(input);
+            const svg = renderToSVG(tokens);
+            const blob = new Blob([svg], {type: "image/svg+xml"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "partitura_rng.svg";
+            a.click();
+        }
+
+        async function saveToDB() {
+            if (!currentUser) return alert("Please log in first");
+            const input = document.getElementById("input").value;
+            const title = prompt("Score title:", "Untitled");
+            if (!title) return;
+            try {
+                const resp = await fetch(`${API_BASE}/scores`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${accessToken}`
+                    },
+                    body: JSON.stringify({title: title, cromus_source: input, visibility: "private"})
+                });
+                const data = await resp.json();
+                alert(`✅ Saved! ID: ${data.id}`);
+            } catch (e) {
+                alert(`❌ Error: ${e.message}`);
+            }
+        }
+
+        document.getElementById("input").addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") renderNotation();
+        });
+
+        // Init
+        buildLegend();
+        renderAuthUI();
+        renderNotation();
+    </script>
+</body>
 </html>
