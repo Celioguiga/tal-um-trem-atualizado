@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
 export default async function DashboardPage() {
-  const [totalTurmas, totalAlunos, totalEpocas, totalHorarios, totalPlanos, totalFaltas, totalAvaliacoes, totalMusicas] = await Promise.all([
+  const [totalTurmas, totalAlunos, totalEpocas, totalHorarios, totalPlanos, totalFaltas, totalAvaliacoes, totalMusicas, totalArtigos] = await Promise.all([
     prisma.turma.count(),
     prisma.aluno.count(),
     prisma.epoca.count(),
@@ -11,6 +11,7 @@ export default async function DashboardPage() {
     prisma.falta.count(),
     prisma.avaliacao.count(),
     prisma.musica.count(),
+    prisma.conhecimentoArtigo.count(),
   ]);
 
   const cartoes = [
@@ -22,6 +23,7 @@ export default async function DashboardPage() {
     { href: "/registros", label: "Registros", valor: totalFaltas },
     { href: "/avaliacoes", label: "Avaliações", valor: totalAvaliacoes },
     { href: "/musicas", label: "Músicas", valor: totalMusicas },
+    { href: "/conhecimento", label: "Artigos", valor: totalArtigos },
   ];
 
   return (
@@ -31,7 +33,7 @@ export default async function DashboardPage() {
         <p className="mt-1 text-sm text-stone-500">Visão geral da sua escola.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {cartoes.map((cartao) => (
           <Link
             key={cartao.href}

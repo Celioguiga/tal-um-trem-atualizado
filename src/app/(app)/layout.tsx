@@ -12,11 +12,10 @@ const modulosAtivos = [
   { href: "/registros", label: "Registros" },
   { href: "/avaliacoes", label: "Avaliações" },
   { href: "/musicas", label: "Banco de Músicas" },
+  { href: "/conhecimento", label: "Conhecimento" },
 ];
 
-const modulosEmBreve = [
-  "Conhecimento Waldorf",
-];
+const modulosEmBreve: string[] = [];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
