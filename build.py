@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""
+Pro Studio — montagem do arquivo final.
+Edite SEMPRE os arquivos em src/ (pequenos, patches cirúrgicos — regra do projeto)
+e rode:  python3 build.py
+NUNCA edite pro_studio.html diretamente (588 KB — risco de corrupção).
+"""
+import os
+BASE=os.path.dirname(os.path.abspath(__file__))
+r=lambda p:open(os.path.join(BASE,p),encoding="utf-8").read()
+shell=r("src/shell.html")
+bloco=f"""<script>
+/* VexFlow 4.2.2 (Bravura) — embutido, sem CDN */
+{r("vendor/vexflow-bravura.js")}
+</script>
+<script>
+"use strict";
+{r("src/core.js")}
+{r("src/rng_tab_module.js")}
+{r("src/renderer.js")}
+{r("src/app.js")}
+</script>"""
+out=shell.replace("<!-- @INJETAR_SCRIPTS -->\n</body>\n</html>\n",bloco+"\n</body>\n</html>\n")
+assert bloco in out,"marcador @INJETAR_SCRIPTS não encontrado no shell"
+open(os.path.join(BASE,"pro_studio.html"),"w",encoding="utf-8").write(out)
+print("pro_studio.html montado:",os.path.getsize(os.path.join(BASE,"pro_studio.html"))//1024,"KB")

@@ -1,0 +1,173 @@
+/* =====================================================================
+   RENDERIZADOR — VexFlow 4 (glifos Bravura, qualidade de gravura)
+   Layout: 4 compassos por sistema, última linha ragged (como LilyPond).
+   Modos: "real" (formas RNFG coloridas), "forma" (formas pretas),
+          "trad" (pauta tradicional).
+===================================================================== */
+function renderScore(VF, doc, container, events, opts){
+  const {nMeasures,tsNum,ts,key,mode,width}=opts;
+  const warns=[];
+  const NSVG="http://www.w3.org/2000/svg";
+  const mk=(t,a)=>{const e=doc.createElementNS(NSVG,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+
+  const perLine=width<620?2:4;
+  const lines=Math.ceil(nMeasures/perLine);
+  const titleH=opts.title?64:14;
+  const lineH=126, top=titleH, mX=4;
+  const TAB_H=110, rowH=lineH+TAB_H;  // TAB_H: faixa reservada pra Real Tablatura acima de cada sistema
+  const H=top+lines*rowH+30;
+
+  const renderer=new VF.Renderer(container,VF.Renderer.Backends.SVG);
+  renderer.resize(width,H);
+  const ctx=renderer.getContext();
+  const svg=container.querySelector("svg");
+  if(opts.title){
+    const t=mk("text",{x:width/2,y:30,"text-anchor":"middle","font-size":24,
+      fill:"#1d1d1b",style:"font-family:Georgia,'Times New Roman',serif;font-weight:600"});
+    t.textContent=opts.title;svg.appendChild(t);
+    if(opts.subtitle){
+      const s=mk("text",{x:width/2,y:48,"text-anchor":"middle","font-size":10.5,
+        fill:"#8a8474","letter-spacing":"1.5",style:"font-family:Georgia,serif"});
+      s.textContent=opts.subtitle;svg.appendChild(s);
+    }
+  }
+
+  const hasKeySig=key.sig!==0;
+  const staveNotes=[]; // paralelo a events (null p/ nada)
+  const allTuplets=[], allBeams=[], measureStaves=[];
+  let evIdx=0;
+
+  for(let mi=0;mi<nMeasures;mi++){
+    const line=Math.floor(mi/perLine), col=mi%perLine;
+    const isLastLine=line===lines-1;
+    const inLine=isLastLine?Math.min(perLine,nMeasures-line*perLine):perLine;
+    // ragged-last: última linha usa a mesma largura por compasso das cheias
+    const fullW=(width-2*mX)/perLine;
+    const stW=fullW;
+    const stave=new VF.Stave(mX+col*stW, top+line*rowH+TAB_H, stW);
+    if(col===0){
+      stave.addClef("treble");
+      if(hasKeySig)stave.addKeySignature(key.spec);
+    }
+    if(mi===0)stave.addTimeSignature(ts);
+    // ---- estrutura vinda do parser (opts.measures): ||: :|| casa 1/2 fim ----
+    const ms=(opts.measures&&opts.measures[mi])||{};
+    if(ms.repeatBegin)stave.setBegBarType(VF.Barline.type.REPEAT_BEGIN);
+    if(ms.repeatEnd)stave.setEndBarType(VF.Barline.type.REPEAT_END);
+    else if(ms.endBar||mi===nMeasures-1)stave.setEndBarType(VF.Barline.type.END);
+    if(ms.volta){ // casa 1/2 podem abranger vários compassos: BEGIN na 1ª, END na última, MID no meio
+      const prev=(opts.measures&&opts.measures[mi-1])||{}, next=(opts.measures&&opts.measures[mi+1])||{};
+      const first=prev.volta!==ms.volta, last=next.volta!==ms.volta, T=VF.Volta.type;
+      const vt=first&&last?T.BEGIN_END:first?T.BEGIN:last?T.END:T.MID;
+      stave.setVoltaType(vt, first?ms.volta+".":"", 0); // rótulo só em BEGIN/BEGIN_END (VexFlow só desenha o nº nesses)
+    }
+    stave.setContext(ctx).draw();
+    measureStaves.push(stave);
+
+    const mEvents=[];while(evIdx<events.length&&events[evIdx].measure===mi)mEvents.push(events[evIdx++]);
+
+    const notes=mEvents.map(e=>{
+      let n;
+      if(e.rest){
+        n=new VF.StaveNote({keys:["b/4"],duration:e.code+"r"});
+      }else{
+        n=new VF.StaveNote({keys:[e.vfKey],duration:e.code,auto_stem:true});
+        if(mode!=="trad")n.setKeyStyle(0,{fillStyle:"none",strokeStyle:"none"});
+      }
+      if(e.dots)for(let d=0;d<e.dots;d++)VF.Dot.buildAndAttach([n],{all:true});
+      n.__ev=e;
+      return n;
+    });
+
+    const voice=new VF.Voice({num_beats:tsNum,beat_value:4}).setMode(VF.Voice.Mode.SOFT);
+    voice.addTickables(notes);
+
+    // acidentes automáticos conforme armadura + estado do compasso (pro)
+    VF.Accidental.applyAccidentals([voice],key.spec);
+
+    // beams e quiálteras por tempo
+    const byBeat={};
+    notes.forEach(n=>{(byBeat[n.__ev.beat]=byBeat[n.__ev.beat]||[]).push(n);});
+    Object.values(byBeat).forEach(gr=>{
+      const e0=gr[0].__ev;
+      if(e0.tupletId&&gr.length>1)
+        allTuplets.push(new VF.Tuplet(gr,{num_notes:e0.tupletTotal,notes_occupied:e0.tupletOcc}));
+      const beamable=gr.length>1&&gr.every(n=>!n.__ev.rest&&["8","16","32","64"].includes(n.__ev.code));
+      if(beamable)allBeams.push(new VF.Beam(gr,true));
+    });
+
+    new VF.Formatter().joinVoices([voice])
+      .format([voice],stave.getNoteEndX()-stave.getNoteStartX()-14);
+    voice.draw(ctx,stave);
+    notes.forEach(n=>staveNotes.push(n));
+  }
+  allBeams.forEach(b=>b.setContext(ctx).draw());
+  allTuplets.forEach(t=>t.setContext(ctx).draw());
+
+  // ---------- ligaduras (StaveTie; cruzando compasso = meias-ligaduras)
+  for(let i=0;i<events.length;i++){
+    const e=events[i];
+    if(e.tie&&!e.rest&&events[i+1]&&!events[i+1].rest){
+      const a=staveNotes[i],b=staveNotes[i+1];
+      try{
+        if(e.measure===events[i+1].measure){
+          new VF.StaveTie({first_note:a,last_note:b,first_indices:[0],last_indices:[0]}).setContext(ctx).draw();
+        }else{
+          new VF.StaveTie({first_note:a,first_indices:[0]}).setContext(ctx).draw();
+          new VF.StaveTie({last_note:b,last_indices:[0]}).setContext(ctx).draw();
+        }
+      }catch(err){warns.push(`Falha ao desenhar ligadura no compasso ${e.measure+1}: ${err.message}`);}
+    }
+  }
+
+  // ---------- overlay RNFG (formas por grau, cores por nota)
+  const anchors=[];
+  staveNotes.forEach((n,i)=>{
+    const e=events[i];
+    if(e.rest){anchors.push(null);return;}
+    let cx,cy;
+    try{cx=(n.getNoteHeadBeginX()+n.getNoteHeadEndX())/2;}
+    catch(_){cx=n.getAbsoluteX()+5.5;}
+    cy=n.getYs()[0];
+    const cor=RNG_MAPPER.cores[e.letter];
+    let g=null;
+    if(mode!=="trad"){
+      g=shapeSvg(mk,e.deg,mode==="real"?cor:"#1d1d1b",cx,cy,5.4);
+      g.setAttribute("class","nt");
+      svg.appendChild(g);
+    }else{
+      g=mk("circle",{cx,cy,r:7,fill:"transparent",class:"nt"});
+      svg.appendChild(g);
+    }
+    anchors.push({cx,cy,cor,midi:e.midi,g});
+  });
+
+  const measureBoxes=measureStaves.map(st=>({x:st.getX(),y:st.getY(),width:st.getWidth()}));
+  return {svg,anchors,warns,height:H,measureBoxes,perLine,rowH,TAB_H,top};
+}
+
+/* formas RNFG em SVG */
+function shapeSvg(mk,deg,cor,cx,cy,s){
+  const st={fill:cor,stroke:"rgba(0,0,0,.32)","stroke-width":"0.8"};
+  const star=(cx,cy,ro,ri)=>{let d="";for(let i=0;i<10;i++){const r=i%2?ri:ro,a=-Math.PI/2+i*Math.PI/5;
+    d+=(i?"L":"M")+(cx+r*Math.cos(a)).toFixed(2)+","+(cy+r*Math.sin(a)).toFixed(2);}return d+"Z";};
+  const hex=(cx,cy,r)=>{let d="";for(let i=0;i<6;i++){const a=-Math.PI/2+i*Math.PI/3;
+    d+=(i?"L":"M")+(cx+r*Math.cos(a)).toFixed(2)+","+(cy+r*Math.sin(a)).toFixed(2);}return d+"Z";};
+  switch(RNG_MAPPER.formas[deg]){
+    case "circulo":  return mk("circle",{cx,cy,r:s*0.98,...st});
+    case "ogiva":{   // ogiva dupla horizontal: dois arcos, pontas agudas nas laterais
+      const w=s*1.38,h=s*0.95;
+      return mk("path",{d:`M ${cx-w},${cy} Q ${cx},${cy-2*h} ${cx+w},${cy} Q ${cx},${cy+2*h} ${cx-w},${cy} Z`,...st});}
+    case "triangulo":return mk("path",{d:`M ${cx},${cy-s*1.14} L ${cx+s*1.06},${cy+s*0.84} L ${cx-s*1.06},${cy+s*0.84} Z`,...st});
+    case "quadrado": return mk("rect",{x:cx-s*0.88,y:cy-s*0.88,width:s*1.76,height:s*1.76,...st});
+    case "estrela":  return mk("path",{d:star(cx,cy,s*1.26,s*0.52),...st});
+    case "hexagono":{ // hexágono deitado (vértices nas laterais), mesma dimensão da ogiva
+      const w=s*1.38,h=s*0.92;
+      return mk("path",{d:`M ${cx-w},${cy} L ${cx-w/2},${cy-h} L ${cx+w/2},${cy-h} L ${cx+w},${cy} L ${cx+w/2},${cy+h} L ${cx-w/2},${cy+h} Z`,...st});}
+    case "casinha":{ // casinha com beiral: corpo largo, telhado baixo, abas evidentes
+      const bw=s*0.84,ew=s*1.46,ey=cy-s*0.34,bh=cy+s*0.98,ap=cy-s*1.12;
+      return mk("path",{d:`M ${cx-bw},${bh} L ${cx-bw},${ey} L ${cx-ew},${ey} L ${cx},${ap} L ${cx+ew},${ey} L ${cx+bw},${ey} L ${cx+bw},${bh} Z`,...st});}
+  }
+}
+
+if(typeof module!=="undefined")module.exports={renderScore,shapeSvg};
