@@ -1,6 +1,6 @@
 /* ===================== APP ===================== */
 const VF=Vex.Flow;
-let lastEvents=[],lastPlayOrder=[],halos=[],synth=null;
+let lastEvents=[],lastPlayOrder=[],halos=[],tabHalos=[],synth=null;
 const $=id=>document.getElementById(id);
 const getMode=()=>document.querySelector('input[name="modo"]:checked').value;
 const KEY_LABEL={C:"Dó maior",G:"Sol maior",D:"Ré maior",A:"Lá maior",E:"Mi maior",F:"Fá maior",
@@ -41,7 +41,7 @@ function render(){
   buildLegend();
   const av=$("avisos");av.innerHTML="";
   const box=$("score");box.innerHTML="";
-  halos=[];
+  halos=[];tabHalos=[];
 
   const titulo=$("titulo").value.trim()||"Sem Título";
   const ts=$("compasso").value, tsNum=+ts.split("/")[0];
@@ -66,9 +66,11 @@ function render(){
   }
 
   try{
-    desenhaTabInline(out.svg, mkEl, events, out.anchors, out.measureBoxes, out.perLine, out.rowH, out.TAB_H, out.top, tonicaPc(key), Object.assign({compasso: ts, armadura: armaduraLabel}, getTabOpts()));
+    const tabResult=desenhaTabInline(out.svg, mkEl, events, out.anchors, out.measureBoxes, out.perLine, out.rowH, out.TAB_H, out.top, tonicaPc(key), Object.assign({compasso: ts, armadura: armaduraLabel}, getTabOpts()));
+    tabHalos=tabResult.tabHalos;
   }catch(err){
     console.error("Real Tablatura:", err);
+    tabHalos=[];
   }
 
   out.anchors.forEach((a,i)=>{
@@ -88,6 +90,10 @@ function render(){
 }
 
 /* ---------- playback ---------- */
+function pintarHalo(idx,op){
+  const h=halos[idx];if(h)h.setAttribute("opacity",op);
+  const t=tabHalos[idx];if(t)t.setAttribute("opacity",op);
+}
 function ensureSynth(){if(!synth)synth=new Tone.Synth({oscillator:{type:"triangle"},
   envelope:{attack:0.01,decay:0.12,sustain:0.55,release:0.25}}).toDestination();}
 function schedule(){
@@ -107,7 +113,7 @@ function schedule(){
 }
 function stopPlayback(){
   try{Tone.Transport.stop();Tone.Transport.cancel();}catch(_){}
-  halos.forEach(h=>h&&h.setAttribute("opacity","0"));
+  for(let i=0;i<lastEvents.length;i++)pintarHalo(i,"0");
 }
 async function play(){
   if(!lastEvents.length)return;
@@ -116,8 +122,8 @@ async function play(){
   sched.forEach(s=>{
     Tone.Transport.scheduleOnce(time=>{
       synth.triggerAttackRelease(Tone.Frequency(s.midi,"midi"),s.dur*0.92,time);
-      Tone.Draw.schedule(()=>{const h=halos[s.idx];if(h)h.setAttribute("opacity",".26");},time);
-      Tone.Draw.schedule(()=>{const h=halos[s.idx];if(h)h.setAttribute("opacity","0");},time+s.dur*0.9);
+      Tone.Draw.schedule(()=>pintarHalo(s.idx,".26"),time);
+      Tone.Draw.schedule(()=>pintarHalo(s.idx,"0"),time+s.dur*0.9);
     },s.time);
   });
   Tone.Transport.scheduleOnce(()=>stopPlayback(),total+0.4);

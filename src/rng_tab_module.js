@@ -198,11 +198,12 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
   const texto='#666', linhaCor='#999', barraCor='#333';
 
   const idxNotas=[]; events.forEach((e,i)=>{ if(!e.rest) idxNotas.push(i); });
-  if(!idxNotas.length || !measureBoxes.length) return;
+  if(!idxNotas.length || !measureBoxes.length) return {tabHalos:[]};
   const pcs = idxNotas.map(i=>pcDoEvento(events[i]));
   const posicoes = modo==='caged'
     ? posicionaMelodiaCaged(pcs, tonicaPc, shape)
     : posicionaMelodia(pcs);
+  const tabHalos = new Array(events.length).fill(null);
 
   const ALT=15, PAD=22;
   const nomesCordas=['Mi','Lá','Ré','Sol','Si','Mi'];
@@ -238,6 +239,10 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
     }
     frag += `<line x1="${xFim}" y1="${linhaY(5)-7}" x2="${xFim}" y2="${linhaY(0)+7}" stroke="${barraCor}" stroke-width="2"/>`;
 
+    const g=mk('g',{class:'real-tab-line'});
+    g.innerHTML=frag;
+    svg.appendChild(g);
+
     idxNotas.forEach((idx,k)=>{
       const e=events[idx];
       if(Math.floor(e.measure/perLine)!==line) return;
@@ -246,11 +251,14 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
       const cx=anchors[idx] ? anchors[idx].cx : null;
       if(cx==null) return;
       const extra=p.fora?`stroke="#c33" stroke-width="1.4" stroke-dasharray="2,2"`:'';
-      frag += `<g transform="translate(${cx},${linhaY(p.corda)})">${noteFormNum(forma,cor,10,p.casa,extra)}</g>`;
+      const noteG=mk('g',{transform:`translate(${cx},${linhaY(p.corda)})`,'data-idx':idx});
+      const halo=mk('circle',{r:14,fill:cor,opacity:0,'pointer-events':'none'});
+      noteG.appendChild(halo);
+      noteG.insertAdjacentHTML('beforeend',noteFormNum(forma,cor,10,p.casa,extra));
+      g.appendChild(noteG);
+      tabHalos[idx]=halo;
     });
-
-    const g=mk('g',{class:'real-tab-line'});
-    g.innerHTML=frag;
-    svg.appendChild(g);
   }
+
+  return {tabHalos};
 }
