@@ -410,7 +410,10 @@ if(typeof module!=="undefined")module.exports={RNG_MAPPER,LETTERS,SEMI,KEYS,keyI
 
 /* ---------- violão: afinação padrão, cordas 6ª→1ª, em pitch class ---------- */
 const CORDAS = [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.E ?? 4];
+/* mesma afinação, em MIDI absoluto (E2 A2 D3 G3 B3 E4) — usada pra bater a oitava exata */
+const CORDAS_MIDI = [40, 45, 50, 55, 59, 64];
 const NCASAS = 12;
+const midiDoCorda = (corda,casa) => CORDAS_MIDI[corda] + casa;
 
 /* pitch class de um evento da pauta (e.letter + e.acc, já vêm do buildScore) */
 function pcDoEvento(e){ return ((SEMI[e.letter] ?? 0) + (e.acc||0) + 12) % 12; }
@@ -423,18 +426,37 @@ function posicoesPossiveis(pc, maxCasa){
     if((CORDAS[c]+f)%12 === pc) opcoes.push({corda:c, casa:f});
   return opcoes;
 }
-/* modo "mais próxima": minimiza salto de casa/corda nota-a-nota */
-function posicionaMelodia(pcs, casaInicial){
+/* escolhe 1 posição dentre as opções, priorizando MIDI exato da nota (oitava
+   certa) sobre o menor deslocamento — o deslocamento só desempata entre
+   posições que já batem o MIDI exato. Se nenhuma bater, tenta o braço
+   inteiro; se ainda assim nenhuma bater, cai pro pc mais próximo (oitava
+   possivelmente errada) e marca fora=true. */
+function escolherPosicao(pc, alvoMidi, opcoesPreferidas, atual){
+  /* violão é transpositor: soa 1 oitava abaixo do escrito na pauta — a busca de
+     posição mira no MIDI real do braço, não no MIDI escrito (e.midi) */
+  const alvoReal = alvoMidi - 12;
+  let pool = opcoesPreferidas.filter(o=>midiDoCorda(o.corda,o.casa)===alvoReal);
+  let fora = false;
+  if(!pool.length){
+    const todas = posicoesPossiveis(pc);
+    const exatasTodas = todas.filter(o=>midiDoCorda(o.corda,o.casa)===alvoReal);
+    pool = exatasTodas.length ? exatasTodas : (opcoesPreferidas.length ? opcoesPreferidas : todas);
+    fora = true;
+  }
+  let melhor = pool[0], custo = Infinity;
+  pool.forEach(o=>{
+    const c = Math.abs(o.casa-atual.casa)*2 + Math.abs(o.corda-atual.corda);
+    if(c<custo){custo=c; melhor=o;}
+  });
+  return {corda:melhor.corda, casa:melhor.casa, pc, fora};
+}
+/* modo "mais próxima": MIDI exato manda; deslocamento de casa/corda só desempata */
+function posicionaMelodia(pcs, midis, casaInicial){
   let atual = {corda: 2, casa: casaInicial ?? 0};
-  return pcs.map(pc=>{
-    const opcoes = posicoesPossiveis(pc);
-    let melhor = opcoes[0], custo = Infinity;
-    opcoes.forEach(o=>{
-      const c = Math.abs(o.casa-atual.casa)*2 + Math.abs(o.corda-atual.corda);
-      if(c<custo){custo=c; melhor=o;}
-    });
-    atual = melhor;
-    return {corda:melhor.corda, casa:melhor.casa, pc};
+  return pcs.map((pc,k)=>{
+    const p = escolherPosicao(pc, midis[k], posicoesPossiveis(pc), atual);
+    atual = p;
+    return p;
   });
 }
 
@@ -457,20 +479,17 @@ function janelaCaged(tonicaPc, shapeKey){
   const base = casaFundamental(tonicaPc, sh.corda);
   return { min: Math.max(0, base+sh.offsetMin), max: Math.min(NCASAS, base+sh.offsetMax) };
 }
-function posicionaMelodiaCaged(pcs, tonicaPc, shapeKey){
+function posicionaMelodiaCaged(pcs, midis, tonicaPc, shapeKey){
   const jan = janelaCaged(tonicaPc, shapeKey);
   let atual = {corda: CAGED_SHAPES[shapeKey].corda, casa: jan.min};
-  return pcs.map(pc=>{
-    let opcoes = posicoesPossiveis(pc).filter(o=>o.casa>=jan.min && o.casa<=jan.max);
-    let fora = false;
-    if(!opcoes.length){ opcoes = posicoesPossiveis(pc); fora = true; }
-    let melhor = opcoes[0], custo = Infinity;
-    opcoes.forEach(o=>{
-      const c = Math.abs(o.casa-atual.casa)*2 + Math.abs(o.corda-atual.corda);
-      if(c<custo){custo=c; melhor=o;}
-    });
-    atual = melhor;
-    return {corda:melhor.corda, casa:melhor.casa, pc, fora};
+  return pcs.map((pc,k)=>{
+    let opcoesJanela = posicoesPossiveis(pc).filter(o=>o.casa>=jan.min && o.casa<=jan.max);
+    const foraJanela = !opcoesJanela.length;
+    if(foraJanela) opcoesJanela = posicoesPossiveis(pc);
+    const p = escolherPosicao(pc, midis[k], opcoesJanela, atual);
+    p.fora = p.fora || foraJanela;
+    atual = p;
+    return p;
   });
 }
 
@@ -500,6 +519,12 @@ function noteFormNum(forma, cor, r, casa, extra){
   const fs = (r*1.25).toFixed(1);
   return `${noteForm(forma,cor,r,extra)}<text x="0" y="${(dy+parseFloat(fs)*0.35).toFixed(1)}" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="${fs}" fill="${tinta}" text-anchor="middle">${casa}</text>`;
 }
+/* arco de ligadura de prolongamento entre 2 posições (mesma linha do braço) */
+function arcoLigadura(x1,y1,x2,y2){
+  const bulge = Math.max(4, Math.min(10, Math.abs(x2-x1)*0.25));
+  const midX = (x1+x2)/2, midY = (y1+y2)/2 - bulge;
+  return `<path d="M ${x1} ${y1} Q ${midX} ${midY} ${x2} ${y2}" fill="none" stroke="#999" stroke-width="1.3"/>`;
+}
 
 /* =====================================================================
    desenhaTab() — desenha a Real Tablatura da melodia (eixo X = tempo,
@@ -523,9 +548,10 @@ function desenhaTab(destino, events, tonicaPc, opts){
   const notas = events.filter(e => !e.rest);
   if(!notas.length){ destino.innerHTML=''; return; }
   const pcs = notas.map(pcDoEvento);
+  const midis = notas.map(e=>e.midi);
   const posicoes = modo==='caged'
-    ? posicionaMelodiaCaged(pcs, tonicaPc, shape)
-    : posicionaMelodia(pcs);
+    ? posicionaMelodiaCaged(pcs, midis, tonicaPc, shape)
+    : posicionaMelodia(pcs, midis);
 
   const N = notas.length;
   const X0=70, PASSO=46, X1=X0+(N-1)*PASSO+40;
@@ -604,10 +630,18 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
   const idxNotas=[]; events.forEach((e,i)=>{ if(!e.rest) idxNotas.push(i); });
   if(!idxNotas.length || !measureBoxes.length) return {tabHalos:[]};
   const pcs = idxNotas.map(i=>pcDoEvento(events[i]));
+  const midis = idxNotas.map(i=>events[i].midi);
   const posicoes = modo==='caged'
-    ? posicionaMelodiaCaged(pcs, tonicaPc, shape)
-    : posicionaMelodia(pcs);
+    ? posicionaMelodiaCaged(pcs, midis, tonicaPc, shape)
+    : posicionaMelodia(pcs, midis);
   const tabHalos = new Array(events.length).fill(null);
+
+  /* ligaduras de prolongamento (~ com mesma nota): a 2ª nota some da tela (sem
+     glifo, sem halo) e vira só o destino de um arco saindo da 1ª — não duplica
+     o ataque, igual ao skip set de schedule() em app.js */
+  const ligaduras = idxNotas.filter(idx=>events[idx].tie && events[idx].sameTie);
+  const suprimidos = new Set(ligaduras.map(idx=>idx+1));
+  const posPorIdx = {}; idxNotas.forEach((idx,k)=>{ posPorIdx[idx]=posicoes[k]; });
 
   const ALT=15, PAD=22;
   const nomesCordas=['Mi','Lá','Ré','Sol','Si','Mi'];
@@ -650,6 +684,7 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
     idxNotas.forEach((idx,k)=>{
       const e=events[idx];
       if(Math.floor(e.measure/perLine)!==line) return;
+      if(suprimidos.has(idx)) return;
       const p=posicoes[k];
       const cor=RNG_MAPPER.cores[e.letter], forma=RNG_MAPPER.formas[e.deg];
       const cx=anchors[idx] ? anchors[idx].cx : null;
@@ -661,6 +696,21 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
       noteG.insertAdjacentHTML('beforeend',noteFormNum(forma,cor,10,p.casa,extra));
       g.appendChild(noteG);
       tabHalos[idx]=halo;
+    });
+
+    ligaduras.forEach(idx=>{
+      const prox=idx+1;
+      const p1=posPorIdx[idx], p2=posPorIdx[prox];
+      const cx1=anchors[idx]?anchors[idx].cx:null, cx2=anchors[prox]?anchors[prox].cx:null;
+      if(!p1||!p2||cx1==null||cx2==null) return;
+      const sist1=Math.floor(events[idx].measure/perLine), sist2=Math.floor(events[prox].measure/perLine);
+      if(sist1===line && sist2===line){
+        g.insertAdjacentHTML('beforeend', arcoLigadura(cx1,linhaY(p1.corda), cx2,linhaY(p2.corda)));
+      }else if(sist1===line){
+        g.insertAdjacentHTML('beforeend', arcoLigadura(cx1,linhaY(p1.corda), xFim-6,linhaY(p1.corda)));
+      }else if(sist2===line){
+        g.insertAdjacentHTML('beforeend', arcoLigadura(xIni+6,linhaY(p2.corda), cx2,linhaY(p2.corda)));
+      }
     });
   }
 
