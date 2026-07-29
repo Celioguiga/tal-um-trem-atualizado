@@ -66,7 +66,7 @@ function render(){
   }
 
   try{
-    const tabResult=desenhaTabInline(out.svg, mkEl, events, out.anchors, out.measureBoxes, out.perLine, out.rowH, out.TAB_H, out.top, tonicaPc(key), Object.assign({compasso: ts, armadura: armaduraLabel}, getTabOpts()));
+    const tabResult=desenhaTabInline(out.svg, mkEl, events, out.anchors, out.measureBoxes, parsed.measures, out.perLine, out.rowH, out.TAB_H, out.top, tonicaPc(key), Object.assign({compasso: ts, armadura: armaduraLabel}, getTabOpts()));
     tabHalos=tabResult.tabHalos;
   }catch(err){
     console.error("Real Tablatura:", err);

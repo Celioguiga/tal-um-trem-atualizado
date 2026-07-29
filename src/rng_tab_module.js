@@ -121,6 +121,35 @@ function arcoLigadura(x1,y1,x2,y2){
   const midX = (x1+x2)/2, midY = (y1+y2)/2 - bulge;
   return `<path d="M ${x1} ${y1} Q ${midX} ${midY} ${x2} ${y2}" fill="none" stroke="#999" stroke-width="1.3"/>`;
 }
+/* repeat-begin/repeat-end: fina + grossa + 2 pontos (espírito de VF.Barline
+   REPEAT_BEGIN/REPEAT_END). lado='begin': fina na borda, grossa e pontos pra
+   dentro da seção repetida (direita). lado='end': espelhado (pontos e grossa
+   à esquerda, fina na borda). */
+function glifoRepeticao(xBorda, lado, y1, y2, cor){
+  const dir = lado==='begin' ? 1 : -1;
+  const xGrossa = xBorda + 3*dir, xPontos = xGrossa + 4*dir;
+  const yMeio = (y1+y2)/2, dGap = (y2-y1)*0.09;
+  return `<line x1="${xBorda}" y1="${y1}" x2="${xBorda}" y2="${y2}" stroke="${cor}" stroke-width="1.2"/>`
+    + `<line x1="${xGrossa}" y1="${y1}" x2="${xGrossa}" y2="${y2}" stroke="${cor}" stroke-width="3.5"/>`
+    + `<circle cx="${xPontos}" cy="${yMeio-dGap}" r="1.8" fill="${cor}"/>`
+    + `<circle cx="${xPontos}" cy="${yMeio+dGap}" r="1.8" fill="${cor}"/>`;
+}
+/* barra final (fim de peça/seção, sem repetição): fina + grossa, sem pontos
+   — equivalente a VF.Barline.type.END. Grossa fica na borda (ponta externa). */
+function glifoBarraFinal(xBorda, y1, y2, cor){
+  return `<line x1="${xBorda-3}" y1="${y1}" x2="${xBorda-3}" y2="${y2}" stroke="${cor}" stroke-width="1.2"/>`
+    + `<line x1="${xBorda}" y1="${y1}" x2="${xBorda}" y2="${y2}" stroke="${cor}" stroke-width="3.5"/>`;
+}
+/* bracket de volta (casa 1/2): traço horizontal acima do braço, com gancho só
+   nas pontas REAIS (início/fim de toda a casa, não da linha) e rótulo só
+   quando hookInicio é verdadeiro — evita repetir "1." em meio-bracket. */
+function traceVolta(x1, x2, y, hookInicio, hookFim, rotulo, cor, corTexto){
+  let s = `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${cor}" stroke-width="1.4"/>`;
+  if(hookInicio) s += `<line x1="${x1}" y1="${y}" x2="${x1}" y2="${y+6}" stroke="${cor}" stroke-width="1.4"/>`;
+  if(hookFim) s += `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${y+6}" stroke="${cor}" stroke-width="1.4"/>`;
+  if(rotulo) s += `<text x="${x1+4}" y="${y-3}" font-size="11" font-weight="700" fill="${corTexto}" font-family="IBM Plex Mono, monospace">${rotulo}</text>`;
+  return s;
+}
 
 /* =====================================================================
    desenhaTab() — desenha a Real Tablatura da melodia (eixo X = tempo,
@@ -215,7 +244,7 @@ function desenhaTab(destino, events, tonicaPc, opts){
    measureBoxes[mi].x (posição real de cada compasso) — alinhamento
    exato com a pauta, não espaçamento simulado.
 ===================================================================== */
-function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH, TAB_H, topY, tonicaPc, opts){
+function desenhaTabInline(svg, mk, events, anchors, measureBoxes, measures, perLine, rowH, TAB_H, topY, tonicaPc, opts){
   opts = opts || {};
   const modo = opts.modo || 'proxima';
   const shape = opts.shape || 'E';
@@ -238,6 +267,14 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
   const ligaduras = idxNotas.filter(idx=>events[idx].tie && events[idx].sameTie);
   const suprimidos = new Set(ligaduras.map(idx=>idx+1));
   const posPorIdx = {}; idxNotas.forEach((idx,k)=>{ posPorIdx[idx]=posicoes[k]; });
+
+  /* volta (casa 1/2): início/fim REAIS de cada casa, comparando com o compasso
+     vizinho no array inteiro — igual ao renderer.js, independe de linha */
+  const voltaInfo = measures.map((m,mi)=>{
+    if(!m.volta) return null;
+    const prev=measures[mi-1]||{}, next=measures[mi+1]||{};
+    return { first: prev.volta!==m.volta, last: next.volta!==m.volta };
+  });
 
   const ALT=15, PAD=22;
   const nomesCordas=['Mi','Lá','Ré','Sol','Si','Mi'];
@@ -269,9 +306,45 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, perLine, rowH,
     }
     for(let mi=mStart; mi<=mEnd; mi++){
       const box=measureBoxes[mi];
-      frag += `<line x1="${box.x}" y1="${linhaY(5)-7}" x2="${box.x}" y2="${linhaY(0)+7}" stroke="${barraCor}" stroke-width="1.2"/>`;
+      const y1=linhaY(5)-7, y2=linhaY(0)+7;
+      const prevM = mi>mStart ? measures[mi-1] : null;
+      if(prevM && prevM.repeatEnd){
+        frag += glifoRepeticao(box.x,'end',y1,y2,barraCor);
+      }else if(prevM && prevM.endBar){
+        frag += glifoBarraFinal(box.x,y1,y2,barraCor);
+      }else if(measures[mi].repeatBegin){
+        frag += glifoRepeticao(box.x,'begin',y1,y2,barraCor);
+      }else{
+        frag += `<line x1="${box.x}" y1="${y1}" x2="${box.x}" y2="${y2}" stroke="${barraCor}" stroke-width="1.2"/>`;
+      }
     }
-    frag += `<line x1="${xFim}" y1="${linhaY(5)-7}" x2="${xFim}" y2="${linhaY(0)+7}" stroke="${barraCor}" stroke-width="2"/>`;
+    { const mEndM=measures[mEnd], yF1=linhaY(5)-7, yF2=linhaY(0)+7;
+      if(mEndM.repeatEnd){
+        frag += glifoRepeticao(xFim,'end',yF1,yF2,barraCor);
+      }else if(mEndM.endBar || mEnd===measures.length-1){
+        frag += glifoBarraFinal(xFim,yF1,yF2,barraCor);
+      }else{
+        frag += `<line x1="${xFim}" y1="${yF1}" x2="${xFim}" y2="${yF2}" stroke="${barraCor}" stroke-width="2"/>`;
+      }
+    }
+
+    { let segIni=null, segVolta=0;
+      const fecharSegmento=(fimMi)=>{
+        const x1=measureBoxes[segIni].x, x2=measureBoxes[fimMi].x+measureBoxes[fimMi].width;
+        const y=linhaY(5)-12;
+        const hookIni=voltaInfo[segIni].first, hookFim=voltaInfo[fimMi].last;
+        frag += traceVolta(x1,x2,y,hookIni,hookFim,hookIni?segVolta+'.':'',barraCor,texto);
+      };
+      for(let mi=mStart; mi<=mEnd; mi++){
+        const v = measures[mi].volta||0;
+        if(v!==segVolta){
+          if(segVolta) fecharSegmento(mi-1);
+          segIni = v ? mi : null;
+          segVolta = v;
+        }
+      }
+      if(segVolta) fecharSegmento(mEnd);
+    }
 
     const g=mk('g',{class:'real-tab-line'});
     g.innerHTML=frag;
