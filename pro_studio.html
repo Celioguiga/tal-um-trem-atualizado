@@ -917,6 +917,27 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
     });
   }
 
+  /* direção de haste ENTRE trilhas simultâneas (2+): a nota mais grave entre as
+     vozes que soam no MESMO instante (measure+beat) recebe haste pra baixo, as
+     outras pra cima — mesma regra da pauta (renderer.js), aplicada só quando há
+     de fato mais de 1 trilha soando junto naquele tempo. Dentro de 1 trilha só
+     (melodia única, sem outra voz simultânea naquele tempo), direcaoHaste(corda)
+     continua decidindo sozinho, sem mudança nenhuma. -1=cima, 1=baixo (mesma
+     convenção de direcaoHaste). */
+  const forcaDirecao = new Map(); // chave "t_idx" -> -1|1
+  if(porTrilha.length>1){
+    const porBeatCruzado={};
+    porTrilha.forEach(pt=>pt.idxNotas.forEach(idx=>{
+      const e=pt.events[idx], chave=e.measure+'_'+e.beat;
+      (porBeatCruzado[chave]=porBeatCruzado[chave]||[]).push({t:pt.t,idx,midi:e.midi});
+    }));
+    Object.values(porBeatCruzado).forEach(grupo=>{
+      if(new Set(grupo.map(g=>g.t)).size<2) return; // só 1 trilha nesse tempo — não força nada
+      const menor=grupo.reduce((a,b)=>b.midi<a.midi?b:a);
+      grupo.forEach(g=>forcaDirecao.set(g.t+'_'+g.idx, g===menor?1:-1));
+    });
+  }
+
   /* volta (casa 1/2): início/fim REAIS de cada casa, comparando com o compasso
      vizinho no array inteiro — igual ao renderer.js, independe de linha */
   const voltaInfo = measures.map((m,mi)=>{
@@ -1043,11 +1064,14 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         if(xs.some(x=>x==null)) return;
         const niveis = grupo.map(idx=>nivelFlags(events[idx].code));
         const beamable = grupo.length>1 && niveis.every(n=>n>0);
+        const direcaoNota = idx => forcaDirecao.has(pt.t+'_'+idx) ? forcaDirecao.get(pt.t+'_'+idx) : direcaoHaste(posPorIdx[idx].corda);
         if(beamable){
           /* grupo sequencial (não é acorde — cada nota toca em seu instante,
-             só dividem 1 beam): direção única decidida pela maioria das cordas
-             do grupo, empate vai pra cima. Todo membro encaixa do mesmo lado. */
-          const dirsMembros = grupo.map(idx=>direcaoHaste(posPorIdx[idx].corda));
+             só dividem 1 beam): direção única decidida pela maioria dos votos
+             do grupo (voto = direção forçada por outra trilha simultânea, se
+             houver; senão, corda), empate vai pra cima. Todo membro encaixa
+             do mesmo lado. */
+          const dirsMembros = grupo.map(direcaoNota);
           const cima = dirsMembros.filter(d=>d<0).length;
           const dirGrupo = cima>=dirsMembros.length-cima ? -1 : 1;
           const xsH = xs.map(x=>x+(dirGrupo<0?STEM_DX:-STEM_DX));
@@ -1058,7 +1082,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         }else{
           grupo.forEach((idx,i)=>{
             if(events[idx].code==='w') return; // semibreve tradicional: sem haste nenhuma
-            const dir = direcaoHaste(posPorIdx[idx].corda);
+            const dir = direcaoNota(idx);
             const xH = xs[i]+(dir<0?STEM_DX:-STEM_DX);
             const base = linhaY(posPorIdx[idx].corda)+dir*12;
             g.insertAdjacentHTML('beforeend', desenhaHaste(xH,base,base+dir*STEM_H,niveis[i],barraCor));
