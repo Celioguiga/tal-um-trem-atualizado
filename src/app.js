@@ -90,7 +90,7 @@ function render(){
       out.svg.insertBefore(h,out.svg.firstChild);
       halos[t][i]=h;
       if(a.g)a.g.addEventListener("click",async()=>{
-        await Tone.start();ensureSynth();
+        await Tone.start();await ensureSynth();
         synth.triggerAttackRelease(Tone.Frequency(a.midi,"midi"),0.4);
         h.setAttribute("opacity",".28");setTimeout(()=>h.setAttribute("opacity","0"),350);
       });
@@ -126,11 +126,17 @@ function acompanharScroll(idx){
   clearTimeout(scrollProgramaticoT);
   scrollProgramaticoT=setTimeout(()=>{scrollProgramatico=false;},1000);
 }
-/* PolySynth (não Synth simples) — precisa sobrepor ataques quando 2+ trilhas
-   soam ao mesmo tempo; mesma assinatura de triggerAttackRelease, sem mudar
-   nenhum outro call site. Ver também o segundo ponto em exportWav(). */
-function ensureSynth(){if(!synth)synth=new Tone.PolySynth(Tone.Synth,{oscillator:{type:"triangle"},
-  envelope:{attack:0.01,decay:0.12,sustain:0.55,release:0.25}}).toDestination();}
+/* Tone.Sampler com amostras reais de violão nylon (GUITAR_SAMPLES_NYLON,
+   src/guitar_samples.js) — poliphônico por natureza (várias notas podem
+   soar juntas), mesma assinatura de triggerAttackRelease do Synth antigo,
+   sem mudar nenhum outro call site além de precisar de await (carrega as
+   amostras de forma assíncrona, mesmo vindo de data: URI embutido — não
+   há requisição de rede, só decodificação). Ver também o segundo ponto em
+   exportWav(). */
+function ensureSynth(){
+  if(!synth)synth=new Tone.Sampler({urls:GUITAR_SAMPLES_NYLON,release:0.8}).toDestination();
+  return Tone.loaded();
+}
 /* sequência de OCORRÊNCIAS pra tocar, de UMA trilha: cada compasso de
    lastPlayOrder (ordem executada — repete corpo, pula casa da passada errada,
    sempre calculada só a partir da trilha principal) vira a lista de índices
@@ -174,7 +180,7 @@ function stopPlayback(){
 }
 async function play(){
   if(!lastTracks.length||!lastTracks.some(tr=>tr.events.length))return;
-  await Tone.start();stopPlayback();ensureSynth();
+  await Tone.start();stopPlayback();await ensureSynth();
   autoScrollAtivo=true;
   const {sched,total}=schedule();
   sched.forEach(s=>{
@@ -226,12 +232,14 @@ async function exportWav(){
   const btn=$("btnWav");btn.disabled=true;btn.textContent="Gerando…";
   try{
     const {sched,total}=schedule();
-    const buf=await Tone.Offline(()=>{
-      /* mesmo PolySynth de ensureSynth() — se só um dos dois pontos trocar,
-         o playback ao vivo fica polifônico mas o WAV sai truncado/monofônico
-         em silêncio, sem erro nenhum. */
-      const s=new Tone.PolySynth(Tone.Synth,{oscillator:{type:"triangle"},
-        envelope:{attack:0.01,decay:0.12,sustain:0.55,release:0.25}}).toDestination();
+    const buf=await Tone.Offline(async()=>{
+      /* mesmo Tone.Sampler de ensureSynth() (amostras reais de violão) — se só
+         um dos dois pontos trocar, o playback ao vivo soa com sample real mas
+         o WAV sai com o synth antigo (ou vice-versa), sem erro nenhum pra
+         avisar. Precisa esperar carregar (Tone.loaded()) ANTES de agendar os
+         triggerAttackRelease — offline não espera sozinho. */
+      const s=new Tone.Sampler({urls:GUITAR_SAMPLES_NYLON,release:0.8}).toDestination();
+      await Tone.loaded();
       sched.forEach(e=>s.triggerAttackRelease(Tone.Frequency(e.midi,"midi"),e.dur*0.92,e.time));
     },total+0.8);
     download(slug()+".wav",new Blob([toWav(buf.get())],{type:"audio/wav"}));

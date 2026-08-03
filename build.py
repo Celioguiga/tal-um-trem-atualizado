@@ -22,6 +22,15 @@ bloco=f"""<script>
 {r("src/core.js")}
 {r("src/rng_tab_module.js")}
 {r("src/renderer.js")}
+</script>
+<script>
+/* Amostras reais de violão (nylon), extraídas do MS Basic.sf3 (MIT) — ver
+   src/guitar_samples.js para os créditos completos. Script à parte só por
+   tamanho (base64), mesmo escopo global dos demais. */
+{r("src/guitar_samples.js")}
+</script>
+<script>
+"use strict";
 {r("src/app.js")}
 </script>"""
 out=shell.replace("<!-- @INJETAR_SCRIPTS -->\n</body>\n</html>\n",bloco+"\n</body>\n</html>\n")
