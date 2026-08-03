@@ -101,19 +101,25 @@ function pathForma(forma, r){
     case 'casinha': { const w=r*0.60,b=r*0.85,e=r*1.02; return `M ${-w} ${b} L ${-w} 0 L ${-e} 0 L 0 ${-r} L ${e} 0 L ${w} 0 L ${w} ${b} Z`; }
   }
 }
-function noteForm(forma, cor, r, extra){
-  if(forma==='circulo') return `<circle r="${r}" fill="${cor}" ${extra||''}/>`;
-  return `<path d="${pathForma(forma,r)}" fill="${cor}" ${extra||''}/>`;
+/* vazado=true: só contorno (mínima/semibreve) — mesmo princípio da cabeça
+   aberta da pauta, sem mexer em haste/tamanho. extra (posição "fora") tem
+   prioridade sobre o contorno padrão quando os dois coexistem. */
+function noteForm(forma, cor, r, extra, vazado){
+  const attrs = vazado
+    ? (extra ? `fill="none" ${extra}` : `fill="none" stroke="${cor}" stroke-width="1.8"`)
+    : `fill="${cor}" ${extra||''}`;
+  if(forma==='circulo') return `<circle r="${r}" ${attrs}/>`;
+  return `<path d="${pathForma(forma,r)}" ${attrs}/>`;
 }
 function tintaContraste(hex){
   const h=hex.replace('#',''); const R=parseInt(h.substr(0,2),16),G=parseInt(h.substr(2,2),16),B=parseInt(h.substr(4,2),16);
   return (R*299+G*587+B*114)/1000 > 150 ? '#111' : '#fff';
 }
-function noteFormNum(forma, cor, r, casa, extra){
-  const tinta = tintaContraste(cor);
+function noteFormNum(forma, cor, r, casa, extra, vazado){
+  const tinta = vazado ? '#333' : tintaContraste(cor);
   const dy = forma==='triangulo' ? r*0.30 : forma==='casinha' ? r*0.34 : 0;
   const fs = (r*1.25).toFixed(1);
-  return `${noteForm(forma,cor,r,extra)}<text x="0" y="${(dy+parseFloat(fs)*0.35).toFixed(1)}" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="${fs}" fill="${tinta}" text-anchor="middle">${casa}</text>`;
+  return `${noteForm(forma,cor,r,extra,vazado)}<text x="0" y="${(dy+parseFloat(fs)*0.35).toFixed(1)}" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="${fs}" fill="${tinta}" text-anchor="middle">${casa}</text>`;
 }
 /* arco de ligadura de prolongamento entre 2 posições (mesma linha do braço) */
 function arcoLigadura(x1,y1,x2,y2){
@@ -152,23 +158,83 @@ function traceVolta(x1, x2, y, hookInicio, hookFim, rotulo, cor, corTexto){
 }
 /* nível de colchete/beam por código de duração (VexFlow: "q" = sem colchete) */
 function nivelFlags(code){ return {8:1,16:2,32:3,64:4}[code] || 0; }
-/* haste sempre pra cima (yTopo < yBase); nFlags>0 empilha colchetes perto da
-   ponta — usada tanto pra nota solta (com colchete) quanto pra nota dentro
-   de um beam (nFlags=0, a barra do beam substitui o colchete) */
+/* deslocamento horizontal do encaixe da haste na nota: pra cima encaixa pela
+   direita, pra baixo pela esquerda — convenção padrão de partitura */
+const STEM_DX = 4;
+/* direção pela corda: as 3 cordas agudas (Sol/Si/Mi aguda, índices 3-5) pra
+   cima; as 3 graves (Mi grave/Lá/Ré, índices 0-2) pra baixo. -1=cima, 1=baixo */
+function direcaoHaste(corda){ return corda>=3 ? -1 : 1; }
+/* haste — direção inferida do sinal de (yTopo-yBase): sobe (yTopo<yBase) ou
+   desce (yTopo>yBase). nFlags>0 empilha colchetes perto da ponta, voltando
+   em direção à nota — usada tanto pra nota solta quanto dentro de um beam
+   (nFlags=0, a barra do beam substitui o colchete). */
 function desenhaHaste(x, yBase, yTopo, nFlags, cor){
+  const dir = yTopo<yBase ? -1 : 1;
   let s = `<line x1="${x}" y1="${yBase}" x2="${x}" y2="${yTopo}" stroke="${cor}" stroke-width="1.4"/>`;
   for(let i=0;i<nFlags;i++){
-    const fy = yTopo + i*5;
-    s += `<path d="M ${x} ${fy} Q ${x+7} ${fy+3} ${x+6} ${fy+9}" fill="none" stroke="${cor}" stroke-width="1.4"/>`;
+    const fy = yTopo - dir*i*5;
+    const fx2 = x + (dir<0?7:-7), fx3 = x + (dir<0?6:-6);
+    s += `<path d="M ${x} ${fy} Q ${fx2} ${fy+dir*3} ${fx3} ${fy+dir*9}" fill="none" stroke="${cor}" stroke-width="1.4"/>`;
   }
   return s;
 }
+/* corpo neutro de uma pausa na tab (fallback caso a extração do VexFlow
+   falhe por qualquer motivo) — sem cor de grau, sem número de casa */
+function glifoPausa(x, y, cor){
+  return `<rect x="${x-4.5}" y="${y-2}" width="9" height="4" rx="1" fill="${cor}"/>`;
+}
+/* glifo REAL de pausa, extraído em runtime do próprio VexFlow (nunca
+   hardcoded — sempre fiel à versão instalada do vendor/Bravura). Renderiza
+   um VF.StaveNote de pausa fora da tela, acha o path do glifo pelo tamanho
+   plausível (exclui as 5 linhas retas da pauta e as barras de compasso) e
+   cacheia por código de duração — só paga o custo de extração 1x por código. */
+const CACHE_PAUSA_VEXFLOW = {};
+const ESCALA_PAUSA = 0.5;
+function obterGlifoPausaVexFlow(code){
+  if(CACHE_PAUSA_VEXFLOW[code]!==undefined) return CACHE_PAUSA_VEXFLOW[code];
+  let resultado = null;
+  if(typeof Vex!=='undefined' && Vex.Flow){
+    const VF = Vex.Flow;
+    const div = document.createElement('div');
+    div.style.position='fixed'; div.style.top='-9999px'; div.style.left='-9999px';
+    document.body.appendChild(div);
+    try{
+      const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+      renderer.resize(200,150);
+      const ctx = renderer.getContext();
+      const stave = new VF.Stave(0,0,180);
+      stave.setContext(ctx).draw();
+      const note = new VF.StaveNote({keys:['b/4'], duration: code+'r'});
+      const voice = new VF.Voice({num_beats:4, beat_value:4}).setMode(VF.Voice.Mode.SOFT);
+      voice.addTickables([note]);
+      new VF.Formatter().joinVoices([voice]).format([voice],150);
+      voice.draw(ctx, stave);
+      const alvo = Array.from(div.querySelectorAll('path')).find(p=>{
+        const bb=p.getBBox(); return bb.width>2.5 && bb.width<25 && bb.height>2 && bb.height<40;
+      });
+      if(alvo){
+        const bb = alvo.getBBox();
+        resultado = { d: alvo.getAttribute('d'), cx: bb.x+bb.width/2, cy: bb.y+bb.height/2 };
+      }
+    }catch(_){ resultado = null; }
+    document.body.removeChild(div);
+  }
+  CACHE_PAUSA_VEXFLOW[code] = resultado;
+  return resultado;
+}
+function glifoPausaVexFlow(code, x, y, cor){
+  const g = obterGlifoPausaVexFlow(code);
+  if(!g) return glifoPausa(x,y,cor);
+  const tx = (x - g.cx*ESCALA_PAUSA).toFixed(2), ty = (y - g.cy*ESCALA_PAUSA).toFixed(2);
+  return `<g transform="translate(${tx},${ty}) scale(${ESCALA_PAUSA})"><path d="${g.d}" fill="${cor}"/></g>`;
+}
 /* barra(s) de beam conectando as hastes de um grupo — nível = duração mais
-   curta do grupo (decisão: beam único, sem beam parcial de gravura profissional) */
-function desenhaBeam(x1, x2, yBeam, nivel, cor){
+   curta do grupo (decisão: beam único, sem beam parcial de gravura profissional).
+   dir: -1=grupo sobe (barras empilham pra baixo, em direção às notas), 1=desce. */
+function desenhaBeam(x1, x2, yBeam, nivel, cor, dir){
   let s = '';
   for(let i=0;i<nivel;i++){
-    const y = yBeam + i*4;
+    const y = yBeam - dir*i*4;
     s += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${cor}" stroke-width="3"/>`;
   }
   return s;
@@ -267,39 +333,85 @@ function desenhaTab(destino, events, tonicaPc, opts){
    measureBoxes[mi].x (posição real de cada compasso) — alinhamento
    exato com a pauta, não espaçamento simulado.
 ===================================================================== */
-function desenhaTabInline(svg, mk, events, anchors, measureBoxes, measures, perLine, rowH, TAB_H, topY, tonicaPc, opts){
+function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, measureBoxes, measures, perLine, rowH, TAB_H, topY, tonicaPc, opts){
   opts = opts || {};
   const modo = opts.modo || 'proxima';
   const shape = opts.shape || 'E';
   const compasso = opts.compasso || '';
   const armadura = opts.armadura || '';
   const texto='#666', linhaCor='#999', barraCor='#333';
+  const warns = [];
 
-  const idxNotas=[]; events.forEach((e,i)=>{ if(!e.rest) idxNotas.push(i); });
-  if(!idxNotas.length || !measureBoxes.length) return {tabHalos:[]};
-  const pcs = idxNotas.map(i=>pcDoEvento(events[i]));
-  const midis = idxNotas.map(i=>events[i].midi);
-  const posicoes = modo==='caged'
-    ? posicionaMelodiaCaged(pcs, midis, tonicaPc, shape)
-    : posicionaMelodia(pcs, midis);
-  const tabHalos = new Array(events.length).fill(null);
+  /* prepara, por trilha: idxNotas/idxPausas/posições/posPorIdx/tabHalos/suprimidos/
+     gruposRitmo — mesmo cálculo que já existia, só rodado 1x por trilha. Trilha
+     principal (corda==null) continua usando a busca heurística (posicionaMelodia/
+     CAGED); trilha com corda declarada usa posição DIRETA (sem busca) — mesma
+     transposição de -12 semitons que escolherPosicao já usa (violão soa 1 oitava
+     abaixo do escrito). */
+  const porTrilha = trilhas.map((tr,t)=>{
+    const events = tr.events;
+    const idxNotas=[], idxPausas=[];
+    events.forEach((e,i)=>{ if(e.rest) idxPausas.push(i); else idxNotas.push(i); });
 
-  /* ligaduras de prolongamento (~ com mesma nota): a 2ª nota some da tela (sem
-     glifo, sem halo) e vira só o destino de um arco saindo da 1ª — não duplica
-     o ataque, igual ao skip set de schedule() em app.js */
-  const ligaduras = idxNotas.filter(idx=>events[idx].tie && events[idx].sameTie);
-  const suprimidos = new Set(ligaduras.map(idx=>idx+1));
-  const posPorIdx = {}; idxNotas.forEach((idx,k)=>{ posPorIdx[idx]=posicoes[k]; });
+    let posicoes;
+    if(tr.corda==null){
+      const pcs = idxNotas.map(i=>pcDoEvento(events[i]));
+      const midis = idxNotas.map(i=>events[i].midi);
+      posicoes = modo==='caged'
+        ? posicionaMelodiaCaged(pcs, midis, tonicaPc, shape)
+        : posicionaMelodia(pcs, midis);
+    }else{
+      const arrIdx = cordaLabelToIndex(tr.corda);
+      posicoes = idxNotas.map(i=>{
+        const e=events[i];
+        const casa = (e.midi-12) - CORDAS_MIDI[arrIdx];
+        return {corda:arrIdx, casa, pc:pcDoEvento(e), fora: casa<0||casa>NCASAS};
+      });
+    }
 
-  /* ritmo: agrupa por measure+beat — mesma chave/critério do byBeat da pauta
-     (e.measure, e.beat, e.code já existem em events, nada recalculado do
-     zero). suprimidos reaproveitado: nota sem glifo também não tem haste. */
-  const notasRitmo = idxNotas.filter(idx=>!suprimidos.has(idx));
-  const gruposRitmo = {};
-  notasRitmo.forEach(idx=>{
-    const e=events[idx], chave=e.measure+'_'+e.beat;
-    (gruposRitmo[chave]=gruposRitmo[chave]||[]).push(idx);
+    const tabHalos = new Array(events.length).fill(null);
+    /* ligaduras de prolongamento (~ com mesma nota): a 2ª nota some da tela (sem
+       glifo, sem halo) e vira só o destino de um arco saindo da 1ª — não duplica
+       o ataque, igual ao skip set de schedule() em app.js */
+    const ligaduras = idxNotas.filter(idx=>events[idx].tie && events[idx].sameTie);
+    const suprimidos = new Set(ligaduras.map(idx=>idx+1));
+    const posPorIdx = {}; idxNotas.forEach((idx,k)=>{ posPorIdx[idx]=posicoes[k]; });
+
+    /* ritmo: agrupa por measure+beat — mesma chave/critério do byBeat da pauta
+       (e.measure, e.beat, e.code já existem em events, nada recalculado do
+       zero). suprimidos reaproveitado: nota sem glifo também não tem haste.
+       Nunca mistura trilhas — cada trilha agrupa só as PRÓPRIAS notas. */
+    const notasRitmo = idxNotas.filter(idx=>!suprimidos.has(idx));
+    const gruposRitmo = {};
+    notasRitmo.forEach(idx=>{
+      const e=events[idx], chave=e.measure+'_'+e.beat;
+      (gruposRitmo[chave]=gruposRitmo[chave]||[]).push(idx);
+    });
+
+    return {t, corda:tr.corda, events, idxNotas, idxPausas, posicoes, posPorIdx, tabHalos, ligaduras, suprimidos, gruposRitmo};
   });
+
+  if(!measureBoxes.length || porTrilha.every(pt=>!pt.idxNotas.length&&!pt.idxPausas.length))
+    return {tracksTabHalos: porTrilha.map(pt=>pt.tabHalos), warns};
+
+  /* aviso (não-bloqueio) de colisão de corda: 2+ trilhas ocupando a MESMA corda no
+     MESMO instante (measure+beat) — fisicamente impossível no violão real. v1 só
+     avisa, não tenta evitar automaticamente (evitar exigiria alimentar a busca
+     heurística com uma lista de cordas proibidas por instante — fora de escopo). */
+  if(porTrilha.length>1){
+    const ocupacao={};
+    porTrilha.forEach(pt=>pt.idxNotas.forEach(idx=>{
+      const e=pt.events[idx], p=pt.posPorIdx[idx];
+      const chave=e.measure+'_'+e.beat+'_'+p.corda;
+      (ocupacao[chave]=ocupacao[chave]||new Set()).add(pt.t);
+    }));
+    Object.entries(ocupacao).forEach(([chave,trilhasEnvolvidas])=>{
+      if(trilhasEnvolvidas.size>1){
+        const [mi,beat]=chave.split('_');
+        warns.push(`Compasso ${+mi+1}, tempo ${+beat+1}: mais de uma voz ocupando a mesma corda ao mesmo tempo — sobreposição fisicamente impossível no violão.`);
+      }
+    });
+  }
 
   /* volta (casa 1/2): início/fim REAIS de cada casa, comparando com o compasso
      vizinho no array inteiro — igual ao renderer.js, independe de linha */
@@ -383,54 +495,87 @@ function desenhaTabInline(svg, mk, events, anchors, measureBoxes, measures, perL
     g.innerHTML=frag;
     svg.appendChild(g);
 
-    idxNotas.forEach((idx,k)=>{
-      const e=events[idx];
-      if(Math.floor(e.measure/perLine)!==line) return;
-      if(suprimidos.has(idx)) return;
-      const p=posicoes[k];
-      const cor=RNG_MAPPER.cores[e.letter], forma=RNG_MAPPER.formas[e.deg];
-      const cx=anchors[idx] ? anchors[idx].cx : null;
-      if(cx==null) return;
-      const extra=p.fora?`stroke="#c33" stroke-width="1.4" stroke-dasharray="2,2"`:'';
-      const noteG=mk('g',{transform:`translate(${cx},${linhaY(p.corda)})`,'data-idx':idx});
-      const halo=mk('circle',{r:14,fill:cor,opacity:0,'pointer-events':'none'});
-      noteG.appendChild(halo);
-      noteG.insertAdjacentHTML('beforeend',noteFormNum(forma,cor,10,p.casa,extra));
-      g.appendChild(noteG);
-      tabHalos[idx]=halo;
-    });
+    // desenha cada trilha nesta linha — todas compartilham a mesma grade de 6 cordas
+    porTrilha.forEach(pt=>{
+      const {events,idxNotas,idxPausas,posicoes,posPorIdx,tabHalos,ligaduras,suprimidos,gruposRitmo}=pt;
+      const anchors=tracksAnchors[pt.t], restAnchors=tracksRestAnchors[pt.t];
 
-    ligaduras.forEach(idx=>{
-      const prox=idx+1;
-      const p1=posPorIdx[idx], p2=posPorIdx[prox];
-      const cx1=anchors[idx]?anchors[idx].cx:null, cx2=anchors[prox]?anchors[prox].cx:null;
-      if(!p1||!p2||cx1==null||cx2==null) return;
-      const sist1=Math.floor(events[idx].measure/perLine), sist2=Math.floor(events[prox].measure/perLine);
-      if(sist1===line && sist2===line){
-        g.insertAdjacentHTML('beforeend', arcoLigadura(cx1,linhaY(p1.corda), cx2,linhaY(p2.corda)));
-      }else if(sist1===line){
-        g.insertAdjacentHTML('beforeend', arcoLigadura(cx1,linhaY(p1.corda), xFim-6,linhaY(p1.corda)));
-      }else if(sist2===line){
-        g.insertAdjacentHTML('beforeend', arcoLigadura(xIni+6,linhaY(p2.corda), cx2,linhaY(p2.corda)));
-      }
-    });
+      idxNotas.forEach((idx,k)=>{
+        const e=events[idx];
+        if(Math.floor(e.measure/perLine)!==line) return;
+        if(suprimidos.has(idx)) return;
+        const p=posicoes[k];
+        const cor=RNG_MAPPER.cores[e.letter], forma=RNG_MAPPER.formas[e.deg];
+        const cx=anchors[idx] ? anchors[idx].cx : null;
+        if(cx==null) return;
+        const extra=p.fora?`stroke="#c33" stroke-width="1.4" stroke-dasharray="2,2"`:'';
+        const vazado = e.code==='h' || e.code==='w';
+        const noteG=mk('g',{transform:`translate(${cx},${linhaY(p.corda)})`,'data-idx':idx,'data-trilha':pt.t});
+        const halo=mk('circle',{r:14,fill:cor,opacity:0,'pointer-events':'none'});
+        noteG.appendChild(halo);
+        noteG.insertAdjacentHTML('beforeend',noteFormNum(forma,cor,10,p.casa,extra,vazado));
+        g.appendChild(noteG);
+        tabHalos[idx]=halo;
+      });
 
-    Object.values(gruposRitmo).forEach(grupo=>{
-      if(Math.floor(events[grupo[0]].measure/perLine)!==line) return;
-      const xs = grupo.map(idx=>anchors[idx]?anchors[idx].cx:null);
-      if(xs.some(x=>x==null)) return;
-      const bases = grupo.map(idx=>linhaY(posPorIdx[idx].corda)-12);
-      const niveis = grupo.map(idx=>nivelFlags(events[idx].code));
-      const beamable = grupo.length>1 && niveis.every(n=>n>0);
-      if(beamable){
-        const yBeam = Math.min(...bases) - STEM_H;
-        grupo.forEach((idx,i)=>g.insertAdjacentHTML('beforeend', desenhaHaste(xs[i],bases[i],yBeam,0,barraCor)));
-        g.insertAdjacentHTML('beforeend', desenhaBeam(xs[0],xs[xs.length-1],yBeam,Math.max(...niveis),barraCor));
-      }else{
-        grupo.forEach((idx,i)=>g.insertAdjacentHTML('beforeend', desenhaHaste(xs[i],bases[i],bases[i]-STEM_H,niveis[i],barraCor)));
-      }
+      ligaduras.forEach(idx=>{
+        const prox=idx+1;
+        const p1=posPorIdx[idx], p2=posPorIdx[prox];
+        const cx1=anchors[idx]?anchors[idx].cx:null, cx2=anchors[prox]?anchors[prox].cx:null;
+        if(!p1||!p2||cx1==null||cx2==null) return;
+        const sist1=Math.floor(events[idx].measure/perLine), sist2=Math.floor(events[prox].measure/perLine);
+        if(sist1===line && sist2===line){
+          g.insertAdjacentHTML('beforeend', arcoLigadura(cx1,linhaY(p1.corda), cx2,linhaY(p2.corda)));
+        }else if(sist1===line){
+          g.insertAdjacentHTML('beforeend', arcoLigadura(cx1,linhaY(p1.corda), xFim-6,linhaY(p1.corda)));
+        }else if(sist2===line){
+          g.insertAdjacentHTML('beforeend', arcoLigadura(xIni+6,linhaY(p2.corda), cx2,linhaY(p2.corda)));
+        }
+      });
+
+      Object.values(gruposRitmo).forEach(grupo=>{
+        if(Math.floor(events[grupo[0]].measure/perLine)!==line) return;
+        const xs = grupo.map(idx=>anchors[idx]?anchors[idx].cx:null);
+        if(xs.some(x=>x==null)) return;
+        const niveis = grupo.map(idx=>nivelFlags(events[idx].code));
+        const beamable = grupo.length>1 && niveis.every(n=>n>0);
+        if(beamable){
+          /* grupo sequencial (não é acorde — cada nota toca em seu instante,
+             só dividem 1 beam): direção única decidida pela maioria das cordas
+             do grupo, empate vai pra cima. Todo membro encaixa do mesmo lado. */
+          const dirsMembros = grupo.map(idx=>direcaoHaste(posPorIdx[idx].corda));
+          const cima = dirsMembros.filter(d=>d<0).length;
+          const dirGrupo = cima>=dirsMembros.length-cima ? -1 : 1;
+          const xsH = xs.map(x=>x+(dirGrupo<0?STEM_DX:-STEM_DX));
+          const bases = grupo.map(idx=>linhaY(posPorIdx[idx].corda)+dirGrupo*12);
+          const yBeam = dirGrupo<0 ? Math.min(...bases)-STEM_H : Math.max(...bases)+STEM_H;
+          grupo.forEach((idx,i)=>g.insertAdjacentHTML('beforeend', desenhaHaste(xsH[i],bases[i],yBeam,0,barraCor)));
+          g.insertAdjacentHTML('beforeend', desenhaBeam(xsH[0],xsH[xsH.length-1],yBeam,Math.max(...niveis),barraCor,dirGrupo));
+        }else{
+          grupo.forEach((idx,i)=>{
+            if(events[idx].code==='w') return; // semibreve tradicional: sem haste nenhuma
+            const dir = direcaoHaste(posPorIdx[idx].corda);
+            const xH = xs[i]+(dir<0?STEM_DX:-STEM_DX);
+            const base = linhaY(posPorIdx[idx].corda)+dir*12;
+            g.insertAdjacentHTML('beforeend', desenhaHaste(xH,base,base+dir*STEM_H,niveis[i],barraCor));
+          });
+        }
+      });
+
+      /* pausas: glifo real do VexFlow (zigzag/colchete/bloco), numa linha central
+         fixa (entre a 3ª e 4ª corda). Sem haste — diferente de nota, o glifo real
+         de pausa já é autossuficiente pra indicar a duração (é o próprio desenho
+         que muda por duração, não uma haste com colchete por cima). */
+      idxPausas.forEach(idx=>{
+        const e=events[idx];
+        if(Math.floor(e.measure/perLine)!==line) return;
+        const x = restAnchors[idx];
+        if(x==null) return;
+        const yCentro = linhaY(2.5);
+        g.insertAdjacentHTML('beforeend', glifoPausaVexFlow(e.code,x,yCentro,barraCor));
+      });
     });
   }
 
-  return {tabHalos};
+  return {tracksTabHalos: porTrilha.map(pt=>pt.tabHalos), warns};
 }

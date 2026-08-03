@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Real Tablatura Studio</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
 :root{
   --bg:#08090C;
@@ -102,7 +101,7 @@ button:disabled{opacity:.45;cursor:default;transform:none}
   padding-bottom:12px;margin-bottom:4px;border-bottom:1px solid #ECE8DC}
 .score-head h2{font-size:22px;font-weight:650;letter-spacing:-.01em}
 .score-head .meta{font-size:11px;color:#9a937f;letter-spacing:.12em;text-transform:uppercase}
-#score{width:100%;overflow-x:auto}
+#score{width:100%;overflow-x:auto;overflow-y:auto;max-height:70vh}
 #score svg{display:block}
 #score .nt{cursor:pointer}
 
@@ -145,7 +144,7 @@ dialog .btns{margin-top:12px;justify-content:flex-end}
         <input id="titulo" value="O Cravo Brigou com a Rosa"></div>
       <div class="grid2 f">
         <div><span class="lbl">Compasso</span>
-          <select id="compasso"><option>2/4</option><option selected>3/4</option><option>4/4</option></select></div>
+          <select id="compasso"><option>2/4</option><option selected>3/4</option><option>4/4</option><option>6/8</option><option>9/8</option><option>12/8</option></select></div>
         <div><span class="lbl">Andamento ♩=</span>
           <input id="andamento" type="number" min="30" max="220" value="90"></div>
       </div>

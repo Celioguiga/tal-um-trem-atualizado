@@ -10,6 +10,10 @@ BASE=os.path.dirname(os.path.abspath(__file__))
 r=lambda p:open(os.path.join(BASE,p),encoding="utf-8").read()
 shell=r("src/shell.html")
 bloco=f"""<script>
+/* Tone.js 14.8.49 — embutido, sem CDN */
+{r("vendor/tone.js")}
+</script>
+<script>
 /* VexFlow 4.2.2 (Bravura) — embutido, sem CDN */
 {r("vendor/vexflow-bravura.js")}
 </script>

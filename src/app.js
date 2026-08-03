@@ -1,6 +1,7 @@
 /* ===================== APP ===================== */
 const VF=Vex.Flow;
-let lastEvents=[],lastPlayOrder=[],halos=[],tabHalos=[],synth=null;
+let lastTracks=[],lastPlayOrder=[],halos=[],tabHalos=[],synth=null;
+let layoutAtual=null,autoScrollAtivo=true,scrollProgramatico=false,scrollProgramaticoT=null;
 const $=id=>document.getElementById(id);
 const getMode=()=>document.querySelector('input[name="modo"]:checked').value;
 const KEY_LABEL={C:"Dó maior",G:"Sol maior",D:"Ré maior",A:"Lá maior",E:"Mi maior",F:"Fá maior",
@@ -44,86 +45,143 @@ function render(){
   halos=[];tabHalos=[];
 
   const titulo=$("titulo").value.trim()||"Sem Título";
-  const ts=$("compasso").value, tsNum=+ts.split("/")[0];
+  const ts=$("compasso").value, [tsNum,tsDen]=ts.split("/").map(Number);
   const bpm=+$("andamento").value||80;
   const key=keyInfo($("tom").value);
 
-  const parsed=parseCromus($("cromus").value);
-  const events=buildScore(parsed,tsNum,key,parsed.warns);
-  lastEvents=events;
-  if(!events.length){av.innerHTML='<span class="err">Nada para renderizar — confira a sintaxe.</span>';return;}
+  const parsedV=parseVozes($("cromus").value,tsNum,tsDen,key);
+  if(parsedV.fatal.length){
+    lastTracks=[];lastPlayOrder=[];
+    av.innerHTML=parsedV.fatal.map(f=>'<span class="err">'+f+'</span>').join("<br>");
+    return;
+  }
+  lastTracks=parsedV.trilhas;
+  lastPlayOrder=unfoldRepeats(lastTracks[0].measures);
+  if(!lastTracks.some(tr=>tr.events.length)){av.innerHTML='<span class="err">Nada para renderizar — confira a sintaxe.</span>';return;}
 
   const armaduraLabel = KEY_LABEL[$("tom").value] + " · " + (key.sig>0 ? key.sig+'♯' : key.sig<0 ? (-key.sig)+'♭' : 'sem alteração');
 
   const width=Math.max(box.clientWidth||760,560);
   let out;
   try{
-    out=renderScore(VF,document,box,events,{
-      nMeasures:parsed.measures.length,measures:parsed.measures,tsNum,ts,key,mode:getMode(),width,
+    out=renderScore(VF,document,box,lastTracks,{
+      nMeasures:lastTracks[0].measures.length,measures:lastTracks[0].measures,tsNum,tsDen,ts,key,mode:getMode(),width,
       title:titulo,subtitle:`${ts} · ♩=${bpm} · ${KEY_LABEL[$("tom").value]} · Synemusic`});
   }catch(err){
     av.innerHTML='<span class="err">Erro na gravura: '+err.message+"</span>";return;
   }
+  layoutAtual=out;
 
+  let tabWarns=[];
   try{
-    const tabResult=desenhaTabInline(out.svg, mkEl, events, out.anchors, out.measureBoxes, parsed.measures, out.perLine, out.rowH, out.TAB_H, out.top, tonicaPc(key), Object.assign({compasso: ts, armadura: armaduraLabel}, getTabOpts()));
-    tabHalos=tabResult.tabHalos;
+    const tabResult=desenhaTabInline(out.svg, mkEl, lastTracks, out.tracks.map(t=>t.anchors), out.tracks.map(t=>t.restAnchors), out.measureBoxes, lastTracks[0].measures, out.perLine, out.rowH, out.TAB_H, out.top, tonicaPc(key), Object.assign({compasso: ts, armadura: armaduraLabel}, getTabOpts()));
+    tabHalos=tabResult.tracksTabHalos;
+    tabWarns=tabResult.warns;
   }catch(err){
     console.error("Real Tablatura:", err);
-    tabHalos=[];
+    tabHalos=lastTracks.map(()=>[]);
   }
 
-  out.anchors.forEach((a,i)=>{
-    if(!a)return;
-    const h=mkEl("circle",{cx:a.cx,cy:a.cy,r:11,fill:a.cor,opacity:0,"pointer-events":"none"});
-    out.svg.insertBefore(h,out.svg.firstChild);
-    halos[i]=h;
-    if(a.g)a.g.addEventListener("click",async()=>{
-      await Tone.start();ensureSynth();
-      synth.triggerAttackRelease(Tone.Frequency(a.midi,"midi"),0.4);
-      h.setAttribute("opacity",".28");setTimeout(()=>h.setAttribute("opacity","0"),350);
+  out.tracks.forEach((trackOut,t)=>{
+    halos[t]=[];
+    trackOut.anchors.forEach((a,i)=>{
+      if(!a)return;
+      const h=mkEl("circle",{cx:a.cx,cy:a.cy,r:11,fill:a.cor,opacity:0,"pointer-events":"none"});
+      out.svg.insertBefore(h,out.svg.firstChild);
+      halos[t][i]=h;
+      if(a.g)a.g.addEventListener("click",async()=>{
+        await Tone.start();ensureSynth();
+        synth.triggerAttackRelease(Tone.Frequency(a.midi,"midi"),0.4);
+        h.setAttribute("opacity",".28");setTimeout(()=>h.setAttribute("opacity","0"),350);
+      });
     });
   });
 
-  const ws=parsed.warns.concat(out.warns);
+  const ws=lastTracks.flatMap(tr=>tr.warns).concat(out.warns).concat(tabWarns);
   if(ws.length)av.innerHTML=ws.map(w=>"⚠ "+w).join("<br>");
 }
 
 /* ---------- playback ---------- */
-function pintarHalo(idx,op){
-  const h=halos[idx];if(h)h.setAttribute("opacity",op);
-  const t=tabHalos[idx];if(t)t.setAttribute("opacity",op);
+function pintarHalo(t,idx,op){
+  const h=halos[t]&&halos[t][idx];if(h)h.setAttribute("opacity",op);
+  const th=tabHalos[t]&&tabHalos[t][idx];if(th)th.setAttribute("opacity",op);
 }
-function ensureSynth(){if(!synth)synth=new Tone.Synth({oscillator:{type:"triangle"},
+/* rola #score pra manter a nota atual visível — só mexe se o alvo já não
+   estiver dentro da área visível (modo "página", não segue nota a nota).
+   Só a trilha principal (t=0) governa o scroll — decisão fechada: com N
+   trilhas tocando, seguir onsets de vozes diferentes geraria scroll instável;
+   trilhas extras continuam acendendo halo normalmente, só não disparam scroll. */
+function acompanharScroll(idx){
+  if(!autoScrollAtivo||!layoutAtual)return;
+  const a=layoutAtual.tracks[0].anchors[idx];if(!a)return;
+  const box=$("score");
+  const line=Math.floor(lastTracks[0].events[idx].measure/layoutAtual.perLine);
+  const yTop=layoutAtual.top+line*layoutAtual.rowH, yBottom=yTop+layoutAtual.rowH;
+  let novoTop=box.scrollTop, novoLeft=box.scrollLeft, precisa=false;
+  if(yTop<box.scrollTop||yBottom>box.scrollTop+box.clientHeight){novoTop=yTop;precisa=true;}
+  if(a.cx<box.scrollLeft||a.cx>box.scrollLeft+box.clientWidth){novoLeft=Math.max(0,a.cx-40);precisa=true;}
+  if(!precisa)return;
+  scrollProgramatico=true;
+  box.scrollTo({top:novoTop,left:novoLeft,behavior:"smooth"});
+  clearTimeout(scrollProgramaticoT);
+  scrollProgramaticoT=setTimeout(()=>{scrollProgramatico=false;},1000);
+}
+/* PolySynth (não Synth simples) — precisa sobrepor ataques quando 2+ trilhas
+   soam ao mesmo tempo; mesma assinatura de triggerAttackRelease, sem mudar
+   nenhum outro call site. Ver também o segundo ponto em exportWav(). */
+function ensureSynth(){if(!synth)synth=new Tone.PolySynth(Tone.Synth,{oscillator:{type:"triangle"},
   envelope:{attack:0.01,decay:0.12,sustain:0.55,release:0.25}}).toDestination();}
+/* sequência de OCORRÊNCIAS pra tocar, de UMA trilha: cada compasso de
+   lastPlayOrder (ordem executada — repete corpo, pula casa da passada errada,
+   sempre calculada só a partir da trilha principal) vira a lista de índices
+   de lastTracks[t].events que pertencem a ele, na ordem escrita. */
+function sequenciaExecutada(t){
+  const events=lastTracks[t].events;
+  const porCompasso={};
+  events.forEach((e,i)=>{(porCompasso[e.measure]=porCompasso[e.measure]||[]).push(i);});
+  const seq=[];
+  (lastPlayOrder&&lastPlayOrder.length?lastPlayOrder:Object.keys(porCompasso).map(Number))
+    .forEach(mi=>{(porCompasso[mi]||[]).forEach(idx=>seq.push(idx));});
+  return seq;
+}
+/* 1 cursor de tempo LOCAL por trilha (tocam em paralelo, não em série) —
+   mesclados numa lista única de onsets ordenada por tempo absoluto. total da
+   peça = a trilha mais longa (Math.max), não a soma. */
 function schedule(){
   const bpm=+$("andamento").value||80, spb=60/bpm;
-  let t=0.06;const out=[];const skip=new Set();
-  for(let i=0;i<lastEvents.length;i++){
-    const e=lastEvents[i];
-    if(!e.rest&&!skip.has(i)){
-      let dur=e.beats,j=i;
-      while(lastEvents[j].tie&&lastEvents[j].sameTie&&j+1<lastEvents.length){
-        dur+=lastEvents[j+1].beats;skip.add(j+1);j++;}
-      out.push({time:t,midi:e.midi,dur:dur*spb,idx:i});
+  const out=[]; const totais=[];
+  lastTracks.forEach((tr,t)=>{
+    const seq=sequenciaExecutada(t);
+    let time=0.06; const skip=new Set();
+    for(let k=0;k<seq.length;k++){
+      const idx=seq[k], e=tr.events[idx];
+      if(!e.rest&&!skip.has(k)){
+        let dur=e.beats,j=k;
+        while(tr.events[seq[j]].tie&&tr.events[seq[j]].sameTie&&j+1<seq.length){
+          dur+=tr.events[seq[j+1]].beats;skip.add(j+1);j++;}
+        out.push({time,midi:e.midi,dur:dur*spb,idx,track:t});
+      }
+      time+=e.beats*spb;
     }
-    t+=e.beats*spb;
-  }
-  return {sched:out,total:t};
+    totais.push(time);
+  });
+  out.sort((a,b)=>a.time-b.time);
+  return {sched:out,total:totais.length?Math.max(...totais):0};
 }
 function stopPlayback(){
   try{Tone.Transport.stop();Tone.Transport.cancel();}catch(_){}
-  for(let i=0;i<lastEvents.length;i++)pintarHalo(i,"0");
+  lastTracks.forEach((tr,t)=>{for(let i=0;i<tr.events.length;i++)pintarHalo(t,i,"0");});
 }
 async function play(){
-  if(!lastEvents.length)return;
+  if(!lastTracks.length||!lastTracks.some(tr=>tr.events.length))return;
   await Tone.start();stopPlayback();ensureSynth();
+  autoScrollAtivo=true;
   const {sched,total}=schedule();
   sched.forEach(s=>{
     Tone.Transport.scheduleOnce(time=>{
       synth.triggerAttackRelease(Tone.Frequency(s.midi,"midi"),s.dur*0.92,time);
-      Tone.Draw.schedule(()=>pintarHalo(s.idx,".26"),time);
-      Tone.Draw.schedule(()=>pintarHalo(s.idx,"0"),time+s.dur*0.9);
+      Tone.Draw.schedule(()=>{pintarHalo(s.track,s.idx,".26");if(s.track===0)acompanharScroll(s.idx);},time);
+      Tone.Draw.schedule(()=>pintarHalo(s.track,s.idx,"0"),time+s.dur*0.9);
     },s.time);
   });
   Tone.Transport.scheduleOnce(()=>stopPlayback(),total+0.4);
@@ -135,12 +193,18 @@ function toCode(){
   return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n\n${$("cromus").value}`;
 }
 function fromCode(code){
-  const lines=code.split("\n");const body=[];
+  /* cabeçalho (@titulo/@compasso/@tom/@andamento) só é reconhecido ANTES da 1ª linha em
+     branco — depois disso tudo é corpo Cromus verbatim, mesmo que alguma linha comece com
+     "@algo:" (ex.: um futuro marcador de voz "@corda6:" dentro da sintaxe). Sem essa trava,
+     uma linha assim no corpo seria capturada como metadado desconhecido e desaparecia. */
+  const lines=code.split("\n");const body=[];let emCabecalho=true;
+  const compassosValidos=[...document.querySelectorAll("#compasso option")].map(o=>o.value);
   for(const ln of lines){
-    const m=ln.match(/^@(\w+):\s*(.+)$/);
+    if(emCabecalho&&ln.trim()===""){emCabecalho=false;body.push(ln);continue;}
+    const m=emCabecalho&&ln.match(/^@(\w+):\s*(.+)$/);
     if(m){const k=m[1],v=m[2].trim();
       if(k==="titulo")$("titulo").value=v;
-      else if(k==="compasso"&&["2/4","3/4","4/4"].includes(v))$("compasso").value=v;
+      else if(k==="compasso"&&compassosValidos.includes(v))$("compasso").value=v;
       else if(k==="tom"&&KEYS[v]!==undefined)$("tom").value=v;
       else if(k==="andamento")$("andamento").value=parseInt(v)||80;
     }else body.push(ln);
@@ -158,12 +222,15 @@ const slug=()=>($("titulo").value.trim()||"cantiga").toLowerCase().normalize("NF
 
 /* ---------- WAV (render offline) ---------- */
 async function exportWav(){
-  if(!lastEvents.length)return;
+  if(!lastTracks.length||!lastTracks.some(tr=>tr.events.length))return;
   const btn=$("btnWav");btn.disabled=true;btn.textContent="Gerando…";
   try{
     const {sched,total}=schedule();
     const buf=await Tone.Offline(()=>{
-      const s=new Tone.Synth({oscillator:{type:"triangle"},
+      /* mesmo PolySynth de ensureSynth() — se só um dos dois pontos trocar,
+         o playback ao vivo fica polifônico mas o WAV sai truncado/monofônico
+         em silêncio, sem erro nenhum. */
+      const s=new Tone.PolySynth(Tone.Synth,{oscillator:{type:"triangle"},
         envelope:{attack:0.01,decay:0.12,sustain:0.55,release:0.25}}).toDestination();
       sched.forEach(e=>s.triggerAttackRelease(Tone.Frequency(e.midi,"midi"),e.dur*0.92,e.time));
     },total+0.8);
@@ -221,3 +288,8 @@ window.addEventListener("load",render);
 
 /* listener do seletor de tablatura (Real Tablatura) */
 document.getElementById("selModoTab").addEventListener("change", render);
+
+/* auto-scroll: se o usuário rolar #score manualmente durante o playback
+   (scroll não disparado por acompanharScroll), desliga o auto-scroll até
+   o próximo play() reativar do zero */
+$("score").addEventListener("scroll",()=>{ if(!scrollProgramatico) autoScrollAtivo=false; });
