@@ -434,9 +434,9 @@ function drawFretboard(notas){
     h+=`<line x1="${s(x)}" y1="${MT}" x2="${s(x)}" y2="${s(H-MB)}" stroke="var(--text)" stroke-width="${f===0?3:1}" opacity=".5"/>`;
   }
   // strings
-  for(let s=0;s<6;s++){
-    const y=MT+s*sh;
-    h+=`<line x1="${ML}" y1="${s(y)}" x2="${s(W-MR)}" y2="${s(y)}" stroke="var(--text)" stroke-width="${(.8+s*.18).toFixed(2)}" opacity=".6"/>`;
+  for(let si=0;si<6;si++){
+    const y=MT+si*sh;
+    h+=`<line x1="${ML}" y1="${s(y)}" x2="${s(W-MR)}" y2="${s(y)}" stroke="var(--text)" stroke-width="${(.8+si*.18).toFixed(2)}" opacity=".6"/>`;
   }
   // fret markers
   for(const [f,n] of Object.entries(FDOTS)){
@@ -455,9 +455,9 @@ function drawFretboard(notas){
     h+=`<text x="${s(x)}" y="${s(H-3)}" text-anchor="middle" font-size="8" fill="var(--text2)" opacity=".7" font-family="serif">${FNAMES[f]}</text>`;
   }
   // string names at left
-  for(let s=0;s<6;s++){
-    const y=MT+s*sh;
-    h+=`<text x="14" y="${s(y+4)}" font-size="11" font-weight="600" fill="var(--text2)" font-family="monospace">${STRS[5-s]}</text>`;
+  for(let si=0;si<6;si++){
+    const y=MT+si*sh;
+    h+=`<text x="14" y="${s(y+4)}" font-size="11" font-weight="600" fill="var(--text2)" font-family="monospace">${STRS[5-si]}</text>`;
   }
   // nut label
   h+=`<text x="${s(ML-5)}" y="${s(H-3)}" text-anchor="end" font-size="8" fill="var(--text2)" opacity=".7" font-family="serif">0</text>`;
