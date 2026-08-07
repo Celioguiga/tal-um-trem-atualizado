@@ -146,42 +146,93 @@ type TimelineNote = {
   freq: number;
   color: string;
   token: string;
+  /* posição e duração em BATIDAS (não segundos) -- várias notas coladas
+     num mesmo tempo (ex.: "12") dividem 1 batida entre si; ver scanBeatGroup */
+  beatStart: number;
+  beatFrac: number;
 };
 
+type MicroNote =
+  | { rest: false; degree: number; octaveOffset: number; accidental: number; parcelas: number }
+  | { rest: true; parcelas: number };
+
+/* Lê uma sequência de notas "coladas" que dividem um mesmo tempo -- ex.:
+   "12" = 2 notas, cada uma com metade do tempo; "7**6*" = tercina (7 com
+   2 parcelas + 6 com 1 parcela, de 3 no total). Apóstrofo antes do dígito =
+   oitava abaixo, depois = oitava acima; # / b = acidente; asteriscos =
+   parcelas (Bíblia §5). */
+function scanBeatGroup(text: string): MicroNote[] {
+  const out: MicroNote[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "-") {
+      i++;
+      let ast = 0;
+      while (text[i] === "*") { ast++; i++; }
+      out.push({ rest: true, parcelas: Math.max(1, ast) });
+      continue;
+    }
+    let leadingApos = 0;
+    while (text[i] === "'") { leadingApos++; i++; }
+    if (!/[1-7]/.test(text[i] || "")) { i++; continue; }
+    const degree = parseInt(text[i], 10); i++;
+    let trailingApos = 0, accidental = 0, ast = 0;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === "'") { trailingApos++; i++; }
+      else if (c === "#") { accidental = 1; i++; }
+      else if (c === "b") { accidental = -1; i++; }
+      else if (c === "*") { ast++; i++; }
+      else break;
+    }
+    out.push({ rest: false, degree, octaveOffset: trailingApos - leadingApos, accidental, parcelas: Math.max(1, ast) });
+  }
+  return out;
+}
+
 function parseTimeline(s: string): TimelineNote[] {
+  /* Vírgula e barra de compasso separam TEMPOS (Bíblia §5) -- viram
+     delimitadores como espaço, mantendo o mesmo tamanho de string pra não
+     desalinhar charStart/charEnd (usados pro highlight na textarea).
+     ||: :|| (CASA n) e FIM são marcadores estruturais: removidos por ora
+     (ainda toca linear, sem desenrolar o ritornello -- casa 1 e 2 seguidas). */
+  const clean = s
+    .replace(/\|\|:|:\|\|/g, (mm) => " ".repeat(mm.length))
+    .replace(/\(\s*CASA\s*\d+\s*\)/gi, (mm) => " ".repeat(mm.length))
+    .replace(/\bFIM\b/gi, (mm) => " ".repeat(mm.length))
+    .replace(/[|,]/g, " ");
+
   const out: TimelineNote[] = [];
   let globalIdx = 0;
-  const re = /\S+/g;
+  let beatCursor = 0;
+  const groupRe = /\S+/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) {
-    const token = m[0];
-    if (token === "-" || token === "|") continue;
-    let octaveOffset = 0;
-    let degree = 0;
-    let acc = 0;
-    for (const ch of token) {
-      if (ch === "'") octaveOffset++;
-      else if (ch === ",") octaveOffset--;
+  while ((m = groupRe.exec(clean)) !== null) {
+    const group = m[0];
+    const micros = scanBeatGroup(group);
+    if (!micros.length) continue;
+    const total = micros.reduce((sum, mn) => sum + mn.parcelas, 0);
+    let offset = 0;
+    for (const mn of micros) {
+      const frac = mn.parcelas / total;
+      if (!mn.rest) {
+        const freq = BASE_FREQ[mn.degree - 1] * 2 ** (mn.accidental / 12) * 2 ** mn.octaveOffset;
+        out.push({
+          idx: globalIdx++,
+          charStart: m.index,
+          charEnd: m.index + group.length,
+          line: s.substring(0, m.index).split("\n").length - 1,
+          degree: mn.degree,
+          freq,
+          color: CORE[mn.degree],
+          token: group,
+          beatStart: beatCursor + offset,
+          beatFrac: frac,
+        });
+      }
+      offset += frac;
     }
-    const digits = token.replace(/[^0-9]/g, "");
-    degree = parseInt(digits, 10);
-    if (degree < 1 || degree > 7 || isNaN(degree)) continue;
-    if (token.includes("#")) acc = 1;
-    if (token.includes("b")) acc = -1;
-    let freq = BASE_FREQ[degree - 1] * 2 ** (acc / 12);
-    freq *= 2 ** octaveOffset;
-
-    out.push({
-      idx: globalIdx,
-      charStart: m.index,
-      charEnd: m.index + token.length,
-      line: s.substring(0, m.index).split("\n").length - 1,
-      degree,
-      freq,
-      color: CORE[degree],
-      token,
-    });
-    globalIdx++;
+    beatCursor += 1;
   }
   return out;
 }
@@ -285,10 +336,10 @@ function createReverb(ctx: AudioContext): GainNode {
   return dry;
 }
 
-function preSchedule(ctx: AudioContext, dest: GainNode, notes: TimelineNote[], beatDur: number) {
+function preSchedule(ctx: AudioContext, dest: GainNode, notes: TimelineNote[], beatDur: number, baseBeat = 0) {
   const now = ctx.currentTime;
-  for (let i = 0; i < notes.length; i++) {
-    scheduleNote(ctx, dest, notes[i].freq, now + i * beatDur, beatDur);
+  for (const n of notes) {
+    scheduleNote(ctx, dest, n.freq, now + (n.beatStart - baseBeat) * beatDur, n.beatFrac * beatDur);
   }
 }
 
@@ -401,7 +452,11 @@ export function NfpPage() {
   const syncLoop = useCallback(() => {
     const ctx = audioRef.current?.ctx;
     if (!ctx || ctx.state === "closed") return;
-    const idx = Math.min(Math.floor((ctx.currentTime - startTimeRef.current) / BEAT_DUR), notes.length - 1);
+    const elapsedBeats = (ctx.currentTime - startTimeRef.current) / BEAT_DUR;
+    /* notas em ordem crescente de beatStart -- avança enquanto a próxima já
+       deveria ter começado (várias notas podem caber dentro de 1 batida) */
+    let idx = lastIdxRef.current;
+    while (idx + 1 < notes.length && notes[idx + 1].beatStart <= elapsedBeats) idx++;
     if (idx !== lastIdxRef.current) {
       lastIdxRef.current = idx;
       setCurrentIdx(idx);
@@ -419,7 +474,9 @@ export function NfpPage() {
         ta.setSelectionRange(n.charStart, n.charEnd);
       }
     }
-    if (idx < notes.length - 1) { rafRef.current = requestAnimationFrame(syncLoop); }
+    const last = notes[notes.length - 1];
+    const totalBeats = last ? last.beatStart + last.beatFrac : 0;
+    if (elapsedBeats < totalBeats) { rafRef.current = requestAnimationFrame(syncLoop); }
     else { stopAudio(); }
   }, [notes, stopAudio, activePage]);
 
@@ -463,8 +520,9 @@ export function NfpPage() {
       const ctx = new AudioContext();
       const dry = createReverb(ctx);
       dry.connect(ctx.destination);
-      preSchedule(ctx, dry, notes.slice(idx), BEAT_DUR);
-      startTimeRef.current = ctx.currentTime - idx * BEAT_DUR;
+      const seekBeat = notes[idx].beatStart;
+      preSchedule(ctx, dry, notes.slice(idx), BEAT_DUR, seekBeat);
+      startTimeRef.current = ctx.currentTime - seekBeat * BEAT_DUR;
       lastIdxRef.current = idx - 1;
       audioRef.current = { ctx };
       setPlaying(true); setPaused(false);
