@@ -100,22 +100,27 @@
       0.1 1 1 #t)
     cor))
 
-%%% Grau 6 — Si — casinha com beiral
+%%% Grau 6 — Si — casinha (polígono único: teto triangular + corpo retangular)
 #(define (make-casinha cor)
   (stencil-with-color
     (make-path-stencil
-      '(moveto  0.00  0.55
-        lineto  0.72  0.17
-        lineto  0.41  0.17
-        lineto  0.41 -0.48
-        lineto -0.41 -0.48
-        lineto -0.41  0.17
-        lineto -0.72  0.17
+      '(moveto  0.00  0.52
+        lineto  0.60  0.04
+        lineto  0.46  0.04
+        lineto  0.32 -0.51
+        lineto -0.32 -0.51
+        lineto -0.46  0.04
+        lineto -0.60  0.04
         closepath)
       0.1 1 1 #t)
     cor))
 
 %%% ── DISPATCHER ─────────────────────────────────────────────
+%%% Dado grau (0–6), índice de cor (0–6) e modo, retorna o stencil
+%%% nota-idx = índice da forma (grau)
+%%% cor-idx  = índice da cor (nota)
+%%% Em REAL_NOTA: forma=grau na escala, cor=nota absoluta
+%%% Em REAL/FORMA: nota-idx = cor-idx
 #(define (get-stencil-cromus nota-idx cor-idx modo)
   (let ((cor (if (string=? modo "FORMA")
                CROMUS_COR_PRETO
@@ -130,25 +135,10 @@
       ((6) (make-casinha   cor))
       (else (make-circulo CROMUS_COR_PRETO)))))
 
-%%% Cor efetiva de fundo (mesma lógica usada dentro de get-stencil-cromus,
-%%% exposta à parte pra quem precisar decidir contraste de texto por cima).
-#(define (cromus-cor-fundo cor-idx modo)
-  (if (string=? modo "FORMA")
-    CROMUS_COR_PRETO
-    (cromus-cor cor-idx)))
-
-%%% Luminância perceptual (0=escuro, 1=claro) e escolha de cor de texto
-%%% legível por cima — branco em fundo escuro, preto no único fundo claro
-%%% da paleta (amarelo do Ré).
-#(define (cromus-luminancia cor)
-  (+ (* 0.299 (car cor)) (* 0.587 (cadr cor)) (* 0.114 (caddr cor))))
-
-#(define (cromus-cor-texto cor-fundo)
-  (if (> (cromus-luminancia cor-fundo) 0.6)
-    (rgb-color 0.05 0.05 0.05)
-    (rgb-color 1.0 1.0 1.0)))
-
-%%% ── ENGRAVER FACTORY (pauta normal) ─────────────────────────
+%%% ── ENGRAVER FACTORY ────────────────────────────────────────
+%%% Uso: \new Staff \with { \consists #(cromus-engraver-factory "REAL") }
+%%%      \new Staff \with { \consists #(cromus-engraver-factory "FORMA") }
+%%%      \new Staff \with { \consists #(cromus-engraver-factory "REAL_NOTA") }
 #(define (cromus-engraver-factory modo)
   (lambda (context)
     (make-engraver
@@ -160,57 +150,27 @@
                 (note-name (if (ly:pitch? pitch)
                              (modulo (ly:pitch-notename pitch) 7)
                              0))
-                (nota-idx note-name)
-                (cor-idx nota-idx))
+                (nota-idx
+                  (if (string=? modo "REAL_NOTA")
+                    ;; REAL_NOTA: grau dentro da escala da tonalidade
+                    ;; obtém o tónico da assinatura de chave (keySignature)
+                    (let* ((ks (ly:context-property context 'keySignature))
+                           (tonic-name (if (pair? ks)
+                                         (ly:pitch-notename (car ks))
+                                         0)))
+                      (modulo (- note-name tonic-name) 7))
+                    ;; REAL / FORMA: grau absoluto da nota
+                    note-name))
+                (cor-idx
+                  (if (string=? modo "REAL_NOTA")
+                    ;; REAL_NOTA: cor = nota absoluta
+                    note-name
+                    ;; REAL / FORMA: cor = mesmo índice
+                    nota-idx)))
             (ly:grob-set-property! grob 'stencil
               (get-stencil-cromus nota-idx cor-idx modo))
             (ly:grob-set-property! grob 'layer -1)))))))
 
 cromusReal     = #(cromus-engraver-factory "REAL")
 cromusForma    = #(cromus-engraver-factory "FORMA")
-
-%%% ── ENGRAVER FACTORY (tablatura) ────────────────────────────
-%%% Mantém o número da casa (não substitui o stencil), só pinta a cor
-%%% do grau atrás dele, num pequeno disco/forma. Reusa a mesma paleta
-%%% e as mesmas formas — sem duplicar lógica de cor.
-#(define (cromus-tab-engraver-factory modo)
-  (lambda (context)
-    (make-engraver
-      (acknowledgers
-        ((tab-note-head-interface engraver grob source-engraver)
-         (let* ((pitch (ly:event-property
-                         (ly:grob-property grob 'cause)
-                         'pitch))
-                (note-name (if (ly:pitch? pitch)
-                             (modulo (ly:pitch-notename pitch) 7)
-                             0))
-                (nota-idx note-name)
-                (cor-idx nota-idx)
-                (cor-fundo (cromus-cor-fundo cor-idx modo))
-                (forma (ly:stencil-scale
-                         (get-stencil-cromus nota-idx cor-idx modo)
-                         2.1 2.1))
-                (numero-cb (ly:grob-property grob 'stencil))
-                (numero-bruto (if (procedure? numero-cb)
-                                (numero-cb grob)
-                                numero-cb))
-                ;; centraliza o número: descobre o centro do seu próprio
-                ;; bounding box e translada pra cima da origem (0,0),
-                ;; que é onde a forma já está centrada.
-                (num-x (ly:stencil-extent numero-bruto X))
-                (num-y (ly:stencil-extent numero-bruto Y))
-                (centro-x (/ (+ (car num-x) (cdr num-x)) 2))
-                (centro-y (/ (+ (car num-y) (cdr num-y)) 2))
-                ;; recolore o número pra ter contraste com o fundo da forma
-                ;; (branco em fundo escuro, preto no amarelo do Ré)
-                (numero-colorido (stencil-with-color
-                                    numero-bruto
-                                    (cromus-cor-texto cor-fundo)))
-                (numero (ly:stencil-translate
-                          numero-colorido
-                          (cons (- centro-x) (- centro-y)))))
-           (ly:grob-set-property! grob 'stencil
-             (ly:stencil-add forma numero))))))))
-
-cromusTabReal  = #(cromus-tab-engraver-factory "REAL")
-cromusTabForma = #(cromus-tab-engraver-factory "FORMA")
+cromusRealNota = #(cromus-engraver-factory "REAL_NOTA")

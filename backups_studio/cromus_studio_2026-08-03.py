@@ -364,23 +364,15 @@ def _parse_nota(tok):
     parcelas = ast if ast > 0 else 1
     corpo = tok.rstrip('*')
     dur_override = None
-    pontos = 0
     m_dur = _re.match(r"^(.+?)([whqestin.]+)$", corpo)
     if m_dur:
         corpo = m_dur.group(1)
         dur_str = m_dur.group(2).rstrip('.')
-        dots = m_dur.group(2).count('.')
         if dur_str in _DUR_MAP_PARSE:
             dur_override = _DUR_MAP_PARSE[dur_str]
+            dots = m_dur.group(2).count('.')
             if dots:
                 dur_override += '.' * dots
-        elif dots:
-            # Só ponto(s), sem letra de duração legada (w/h/q/e/s/t/i) — ponto de
-            # aumento de verdade (Bíblia §6, correção 2026-08-05, substitui o
-            # corte-em-~ que existia pra nota de 1,5 tempo). Não dá pra resolver a
-            # duração final aqui (essa função não sabe o total de parcelas do tempo)
-            # — devolve a contagem de pontos pra _converter_tempo aplicar depois.
-            pontos = dots
     oitava = 0
     while corpo.startswith("'"):
         oitava -= 1; corpo = corpo[1:]
@@ -388,10 +380,10 @@ def _parse_nota(tok):
         oitava += 1; corpo = corpo[:-1]
     corpo = corpo.lstrip('+')
     if corpo in ('-','0'):
-        return ('r', parcelas, finger, dur_override, pontos)
+        return ('r', parcelas, finger, dur_override)
     m = _re.match(r"^([0-7])([#b]?)$", corpo)
     if not m:
-        return (None, parcelas, finger, dur_override, pontos)
+        return (None, parcelas, finger, dur_override)
     grau = int(m.group(1)); acc = m.group(2)
     pitch = _LY_PITCH[grau]
     if oitava > 0:
@@ -403,14 +395,9 @@ def _parse_nota(tok):
         pitch = pitch[0] + 'is' + pitch[1:]
     elif acc == 'b':
         pitch = pitch[0] + 'es' + pitch[1:]
-    return (pitch, parcelas, finger, dur_override, pontos)
+    return (pitch, parcelas, finger, dur_override)
 
-def _eh_tuplet_total(total, compound=False):
-    # Em compasso composto (6/8, 9/8, 12/8...), 1 tempo = semínima pontuada,
-    # que se subdivide naturalmente em 3 (não em potências de 2 puras).
-    # Subdivisões naturais: 3, 6, 12, 24... (3 × potência de 2).
-    if compound:
-        return total not in (1,3,6,12,24,48)
+def _eh_tuplet_total(total):
     return total not in (1,2,4,8,16,32)
 
 def _dur_de_unidades(unidades, unidade_base):
@@ -437,7 +424,7 @@ def _finger_to_ly(finger_str):
             out += '_' + p.lower()
     return out
 
-def _converter_tempo(grupo, compound=False, unidade_tempo_override=None):
+def _converter_tempo(grupo):
     import re as _re
     g = grupo.strip()
     if not g:
@@ -464,7 +451,7 @@ def _converter_tempo(grupo, compound=False, unidade_tempo_override=None):
             if is_tie:
                 tie_next = True
                 continue
-            p, _, finger, dur, _ = _parse_nota(tk.replace('@TIE@',''))
+            p, _, finger, dur = _parse_nota(tk.replace('@TIE@',''))
             if p:
                 nly = p + (dur or '8') + finger
                 if tie_next and corpo:
@@ -512,20 +499,12 @@ def _converter_tempo(grupo, compound=False, unidade_tempo_override=None):
     if total == 0:
         return ''
     has_explicit = any('w' in t or 'h' in t or 'q' in t or 'e' in t or 's' in t or 't' in t or 'i' in t for t,_,_ in notas)
-    tuplet = _eh_tuplet_total(total, compound) and not has_explicit
-    # 1 tempo = semínima (1.0) em compasso simples; semínima pontuada (1.5) em composto.
-    # unidade_tempo_override (Bíblia §6, 2026-08-05): grupo com orçamento REDUZIDO
-    # porque um ponto de aumento no grupo ANTERIOR já consumiu parte deste tempo —
-    # ver _resolver_extensoes em _sintaxe_para_ly_raw, que é quem passa esse valor.
-    unidade_tempo = (
-        unidade_tempo_override if unidade_tempo_override is not None
-        else (1.5 if compound else 1.0)
-    )
+    tuplet = _eh_tuplet_total(total) and not has_explicit
     POW2 = {4.0:'1',2.0:'2',1.0:'4',0.5:'8',0.25:'16',0.125:'32',
             3.0:'2.',1.5:'4.',0.75:'8.',0.375:'16.'}
     corpo = []
     for idx, (base, parcelas, _) in enumerate(notas):
-        pitch, _, finger, dur_override, pontos = _parse_nota(base)
+        pitch, _, finger, dur_override = _parse_nota(base)
         if not pitch:
             continue
         if dur_override:
@@ -534,13 +513,7 @@ def _converter_tempo(grupo, compound=False, unidade_tempo_override=None):
             unidade_base = _UNIDADE_TUPLET.get(total,16)
             nly = pitch + _dur_de_unidades(parcelas or 1, unidade_base) + finger
         else:
-            frac = (parcelas/total)*unidade_tempo if parcelas else (1/total)*unidade_tempo
-            if pontos:
-                # Ponto de aumento (Bíblia §6, 2026-08-05): nota sozinha no seu grupo
-                # (comma), com "." solto — ex.: "6." = semínima pontuada, dividindo o
-                # próximo tempo com outra nota real (achado real: Aurora, semínima
-                # pontuada + colcheia). Mesma fórmula de _beats_flat (1 ponto → ×1,5).
-                frac = frac * (2 - 0.5 ** pontos)
+            frac = (parcelas/total)*1.0 if parcelas else (1/total)*1.0
             nly = pitch + POW2.get(frac,'16') + finger
         if idx in tie_idx:
             nly += '~'
@@ -578,82 +551,6 @@ def _beats_de_ly(ly):
     total += _beats_flat(resto)
     return total
 
-# Ponto de aumento e cadeia + colapsando de verdade (Bíblia §6, 2026-08-05) — achado
-# real convertendo "Aurora" (Zequinha de Abreu): _converter_tempo processa cada grupo
-# separado por vírgula de forma INDEPENDENTE, sem memória do que aconteceu no grupo
-# anterior. Isso quebra dois casos que precisam de estado atravessando grupos:
-#   1. "1+,1" (mínima) virava "c'4~ c'4" (2 semínimas LIGADAS), não "c'2" (1 cabeça de
-#      mínima de verdade, o que a Bíblia promete: "colapsa em 1 evento só").
-#   2. "6.,3" (semínima pontuada + colcheia) — o grupo da colcheia não sabia que só
-#      tinha meio tempo de orçamento (o ponto do grupo anterior já comeu a outra
-#      metade), e virava um "bar check failed" (compasso contado errado).
-_RE_NOTA_BASE = re.compile(r"^('*(?:[0-7][\'#b]*|-))$")
-_RE_NOTA_MAIS = re.compile(r"^('*(?:[0-7][\'#b]*|-))\+$")
-_RE_NOTA_PONTO = re.compile(r"^('*(?:[0-7][\'#b]*|-))\.$")
-_DUR_CADEIA_MAIS = {2: "2", 3: "2.", 4: "1"}  # mínima, mínima pontuada, semibreve
-
-
-def _resolver_extensoes(grupos):
-    """Pré-passada sobre os grupos (separados por vírgula) de um compasso, ANTES da
-    conversão grupo-a-grupo em `_sintaxe_para_ly_raw`. Retorna uma lista paralela a
-    `grupos` com, por índice: None (processar normal), ("vazio",) (absorvido por uma
-    cadeia + anterior, não emite nada) ("override", ly) (já resolvido, usar direto) ou
-    ("orcamento", fracao) (orçamento de tempo reduzido pra passar a _converter_tempo).
-
-    Escopo trava nos dois casos confirmados (cadeia + de 2/3/4 e ponto tirando metade
-    do próximo grupo) — combinações não confirmadas (ponto seguido de ponto, + puxando
-    orçamento de um grupo já reduzido) caem no comportamento antigo, sem inventar
-    (R1)."""
-    n = len(grupos)
-    instrucoes = [None] * n
-    i = 0
-    while i < n:
-        g = grupos[i].strip()
-
-        m_mais = _RE_NOTA_MAIS.match(g)
-        if m_mais:
-            base = m_mais.group(1)
-            cadeia = [i]
-            fechou = False
-            j = i + 1
-            while j < n:
-                gj = grupos[j].strip()
-                mj = _RE_NOTA_MAIS.match(gj)
-                if mj and mj.group(1) == base:
-                    cadeia.append(j)
-                    j += 1
-                    continue
-                mj_fecha = _RE_NOTA_BASE.match(gj)
-                if mj_fecha and mj_fecha.group(1) == base:
-                    cadeia.append(j)
-                    fechou = True
-                break
-            if fechou and len(cadeia) in _DUR_CADEIA_MAIS:
-                pitch, _, finger, _, _ = _parse_nota(base)
-                if pitch:
-                    dur = _DUR_CADEIA_MAIS[len(cadeia)]
-                    instrucoes[cadeia[0]] = ("override", pitch + dur + finger)
-                    for k in cadeia[1:]:
-                        instrucoes[k] = ("vazio",)
-                    i = cadeia[-1] + 1
-                    continue
-            i += 1
-            continue
-
-        if _RE_NOTA_PONTO.match(g):
-            j = i + 1
-            while j < n and grupos[j].strip().startswith('@') and grupos[j].strip().endswith('@'):
-                j += 1  # pula placeholder estrutural (CODA, CASA, etc.) até o próximo conteúdo real
-            if j < n:
-                instrucoes[j] = ("orcamento", 0.5)
-            i += 1
-            continue
-
-        i += 1
-
-    return instrucoes
-
-
 def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80, tonalidade="c \\major"):
     s = sintaxe
     s = s.replace('`', "'")
@@ -662,20 +559,6 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
     s = re.sub(r'\(\s*CASA\s*2\s*\)', ',@volta_2@,', s)
     s = s.replace('||:', ' ,@start_rep@, ')
     s = s.replace(':||', ' ,@end_rep@, ')
-    # Navegação segno/coda — sintaxe nova (Bíblia §6, decisão 2026-08-05), semântica
-    # completa (distingue al Coda de al Fine, diferente do mecanismo antigo abaixo).
-    # Tem que vir ANTES do 'D.C.'/'D.S.' soltos logo depois — senão "D.S. AL CODA"
-    # perde só o "D.S." pro replace antigo e sobra "AL CODA" como lixo não-nota.
-    s = re.sub(r'D\.S\.\s*AL\s*CODA', ' ,@ds_al_coda@, ', s)
-    s = re.sub(r'D\.C\.\s*AL\s*CODA', ' ,@dc_al_coda@, ', s)
-    s = re.sub(r'D\.C\.\s*AL\s*FINE', ' ,@dc_al_fine@, ', s)
-    s = re.sub(r'D\.S\.\s*AL\s*FINE', ' ,@ds_al_fine@, ', s)
-    s = re.sub(r'\bSEGNO\b', ' ,@segno_novo@, ', s)
-    s = re.sub(r'\bCODA\b', ' ,@coda_novo@, ', s)
-    s = re.sub(r'\bFINE\b', ' ,@fine_novo@, ', s)
-    # --- mecanismo antigo (pré-existente, nunca documentado até 2026-08-05 — ver
-    # Bíblia §9): substring solta, sem distinguir al Coda/al Fine. Mantido por
-    # compatibilidade, agora só como fallback depois dos padrões novos acima. ---
     s = s.replace('D.C.', ' ,@da_capo@, ')
     s = s.replace('D.S.', ' ,@dal_segno@, ')
     s = s.replace('𝄌', ' ,@to_coda@, ')
@@ -696,22 +579,13 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
     num, denom = comp_base.split('/')
     # Tempos por compasso em unidade de semínima (ex.: 3/4→3, 4/4→4, 6/8→3, 2/2→4)
     beats_por_compasso = int(num) * 4.0 / int(denom)
-    # Composto: 6/8, 9/8, 12/8... — 1 tempo = semínima pontuada (Bíblia seção 9, ciclo pro_studio 30/07)
-    compound = (int(denom) == 8 and int(num) % 3 == 0)
     grupos = s.split(',')
-    instrucoes_extensao = _resolver_extensoes(grupos)
     partes = []
     cont_tempo = 0.0
     cont_compasso = 0
     # Tabela de conversao placeholder → LilyPond
     LILY_MARKS = {
-        # Achado real (Aurora, 2026-08-05): '(volta "2")' nunca era limpo depois de
-        # CASA2 terminar -- só o @fim@ (fim de TODA a peça) fazia isso. Com 2+ seções
-        # de repetição independentes na mesma peça, a próxima start-repeat colidia com
-        # o estado pendurado da anterior (LilyPond: "already have a VoltaBracket").
-        # (volta #f) antes do start-repeat é no-op se já estava limpo (1ª seção da
-        # peça), e reseta de verdade se não estava (2ª+ seção).
-        '@start_rep@': "\\set Score.repeatCommands = #'((volta #f) start-repeat)",
+        '@start_rep@': "\\set Score.repeatCommands = #'(start-repeat)",
         '@end_rep@':   "\\set Score.repeatCommands = #'((volta #f) end-repeat)",
         '@volta_1@':   "\\set Score.repeatCommands = #'((volta \"1\"))",
         '@volta_2@':   "\\set Score.repeatCommands = #'((volta \"2\"))",
@@ -720,18 +594,8 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
         '@to_coda@':   "\\mark \\markup { \\musicglyph #\"scripts.coda\" }",
         '@segno@':     "\\mark \\markup { \\musicglyph #\"scripts.segno\" }",
         '@fim@':       '\\bar "|." \\mark \\markup { \\bold { Fim } }',
-        # Sintaxe nova (Bíblia §6, 2026-08-05) — cada instrução com texto/glifo
-        # PRÓPRIO, distinguindo al Coda de al Fine (diferença central em relação ao
-        # mecanismo antigo acima, que usa o mesmo texto fixo "D.C. al Fine" pra tudo).
-        '@segno_novo@': "\\mark \\markup { \\musicglyph #\"scripts.segno\" }",
-        '@coda_novo@':  "\\mark \\markup { \\musicglyph #\"scripts.coda\" }",
-        '@ds_al_coda@': "\\mark \\markup { \\bold \"D.S. al Coda\" }",
-        '@dc_al_coda@': "\\mark \\markup { \\bold \"D.C. al Coda\" }",
-        '@dc_al_fine@': "\\mark \\markup { \\bold \"D.C. al Fine\" }",
-        '@ds_al_fine@': "\\mark \\markup { \\bold \"D.S. al Fine\" }",
-        '@fine_novo@':  "\\mark \\markup { \\bold \"Fine\" }",
     }
-    for idx, grupo in enumerate(grupos):
+    for grupo in grupos:
         g = grupo.strip()
         if not g:
             continue
@@ -741,15 +605,7 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
                 partes.append("\\set Score.repeatCommands = #'((volta #f))")
             partes.append(LILY_MARKS[g])
             continue
-        instrucao = instrucoes_extensao[idx]
-        if instrucao and instrucao[0] == 'vazio':
-            continue  # absorvido por uma cadeia + anterior (mínima/mínima pontuada/semibreve)
-        elif instrucao and instrucao[0] == 'override':
-            ly = instrucao[1]
-        elif instrucao and instrucao[0] == 'orcamento':
-            ly = _converter_tempo(g, compound, unidade_tempo_override=instrucao[1])
-        else:
-            ly = _converter_tempo(g, compound)
+        ly = _converter_tempo(g)
         partes.append(ly)
         cont_tempo += _beats_de_ly(ly)  # tempos REAIS do grupo (mínima=2, pontuada, etc.)
         if cont_tempo >= beats_por_compasso - 1e-6:
@@ -769,72 +625,6 @@ def _sintaxe_para_ly_raw(sintaxe, compasso, compassos_por_linha=4, andamento=80,
         '\n'
         '  ' + corpo + '\n'
     )
-
-# ─────────────────────── VOZES / POLIFONIA (@vozN:) ──────────────────────────
-# Sintaxe: a voz principal (sem marcador) continua exatamente como hoje.
-# `@voz2:`, `@voz3:`, `@voz4:` marcam vozes extras simultâneas dentro do MESMO
-# texto Cromus — cada uma com sua própria sintaxe R7 completa (vírgulas, pausas,
-# ligaduras). Máximo 4 vozes (limite dos contextos \voiceOne..\voiceFour do
-# LilyPond, que já cuidam da direção de haste certa: 1/3=cima, 2/4=baixo —
-# não precisa reimplementar a regra grave=baixo/aguda=cima na mão).
-# Decidido 2026-08-03 (ver Bíblia seção 9).
-_VOICE_CMD = {1: '\\voiceOne', 2: '\\voiceTwo', 3: '\\voiceThree', 4: '\\voiceFour'}
-_RE_VOZ_MARK = re.compile(r'@voz(\d+)\s*:')
-_RE_ESTRUTURAL_VOZ_EXTRA = re.compile(
-    r'\|\|:|:\|\||\(\s*CASA\s*[12]\s*\)|\bFIM\b|D\.C\.|D\.S\.', re.IGNORECASE)
-
-def _is_polifonico(sintaxe):
-    return bool(_RE_VOZ_MARK.search(sintaxe))
-
-def _split_vozes(sintaxe):
-    """Divide a sintaxe em (voz_principal, {numero_da_voz: sintaxe_da_voz})."""
-    partes = _RE_VOZ_MARK.split(sintaxe)
-    principal = partes[0].strip()
-    vozes = {}
-    for i in range(1, len(partes), 2):
-        num = int(partes[i])
-        corpo = partes[i + 1].strip() if i + 1 < len(partes) else ''
-        vozes[num] = corpo
-    return principal, vozes
-
-def _extrai_corpo_ly(raw):
-    """Remove as linhas \\time/\\tempo/\\key de um bloco gerado por
-    _sintaxe_para_ly_raw, devolvendo só o corpo de notas."""
-    linhas = raw.split('\n')
-    corpo = [l for l in linhas if not l.strip().startswith(('\\time', '\\tempo', '\\key'))]
-    return '\n'.join(corpo).strip()
-
-def _sintaxe_para_ly_raw_polifonico(sintaxe, compasso, andamento=80, tonalidade="c \\major"):
-    principal, extras = _split_vozes(sintaxe)
-    if not principal:
-        raise ValueError(
-            "Polifonia (@vozN:) exige uma voz principal antes do primeiro marcador — "
-            "a voz principal (sem marcador) é obrigatória.")
-    if any(n < 2 or n > 4 for n in extras):
-        raise ValueError("Vozes extras só podem ser @voz2:, @voz3: ou @voz4: (máximo 4 vozes simultâneas).")
-
-    raw_principal = _sintaxe_para_ly_raw(principal, compasso, andamento=andamento, tonalidade=tonalidade)
-    linhas_header = [l for l in raw_principal.split('\n') if l.strip().startswith(('\\time', '\\tempo', '\\key'))]
-    header = '\n'.join(linhas_header)
-    corpo_principal = _extrai_corpo_ly(raw_principal)
-    n_compassos_principal = corpo_principal.count('|')
-
-    vozes_ly = [(1, corpo_principal)]
-    for num in sorted(extras):
-        texto_extra = _RE_ESTRUTURAL_VOZ_EXTRA.sub('', extras[num])
-        raw_extra = _sintaxe_para_ly_raw(texto_extra, compasso, andamento=andamento, tonalidade=tonalidade)
-        corpo_extra = _extrai_corpo_ly(raw_extra)
-        n_extra = corpo_extra.count('|')
-        if n_extra != n_compassos_principal:
-            raise ValueError(
-                f"A voz {num} (@voz{num}:) tem {n_extra} compasso(s), mas a voz principal "
-                f"tem {n_compassos_principal}. Todas as vozes precisam ter o mesmo número de compassos.")
-        vozes_ly.append((num, corpo_extra))
-
-    blocos = []
-    for num, corpo in vozes_ly:
-        blocos.append(f'    \\new Voice {{ {_VOICE_CMD[num]}\n      {corpo}\n    }}')
-    return header + '\n\n  <<\n' + '\n'.join(blocos) + '\n  >>\n'
 
 def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="c \\major", clef="G_2"):
     import tempfile, os
@@ -856,12 +646,9 @@ def gerar_arquivo_ly(sintaxe, modo, titulo, compasso, andamento=80, tonalidade="
     if _is_orquestral(sintaxe):
         ly = _sintaxe_com_midi(sintaxe_transposta, modo, titulo, compasso, andamento=andamento, tonalidade=tonalidade, clef=clef)
         return ly
-    # Rota monofônica (ou polifônica @vozN:): usa pipeline legado
+    # Rota monofônica: usa pipeline legado
     fn, nome = _localizar_parser()
-    if _is_polifonico(sintaxe_transposta):
-        notas_raw = _sintaxe_para_ly_raw_polifonico(sintaxe_transposta, compasso, andamento=andamento, tonalidade=tonalidade)
-    else:
-        notas_raw = _sintaxe_para_ly_raw(sintaxe_transposta, compasso, andamento=andamento, tonalidade=tonalidade)
+    notas_raw = _sintaxe_para_ly_raw(sintaxe_transposta, compasso, andamento=andamento, tonalidade=tonalidade)
     cantiga = {
         "titulo": titulo, "compositor": "Synemusic", "compasso": compasso,
         "tonalidade": tonalidade, "andamento": andamento, "compassos_por_linha": 4,

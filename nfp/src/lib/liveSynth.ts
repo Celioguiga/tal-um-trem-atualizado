@@ -1,7 +1,6 @@
 /* ── Live Synth — tocar notas em tempo real (SoundFont + sintese fallback) ── */
 
 import { type InstrumentDef, getInstrument, loadSoundfont, getLoadedSoundfont, isSoundfontLoaded } from "./instruments";
-import type { Soundfont as SoundfontInstance } from "smplr";
 
 type Voice = {
   oscillators: OscillatorNode[];

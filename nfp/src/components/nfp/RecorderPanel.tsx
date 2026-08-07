@@ -3,7 +3,7 @@ import { MelodyRecorder, notesToCromus, type DetectedNote } from "../../lib/pitc
 import { MidiRecorder, midiNotesToCromus, type MidiNote } from "../../lib/midiRecorder";
 import { StepRecorder } from "./StepRecorder";
 import { LiveSynth, midiToFreq } from "../../lib/liveSynth";
-import { INSTRUMENTS, getInstrument } from "../../lib/instruments";
+import { INSTRUMENTS } from "../../lib/instruments";
 
 type Tab = "microfone" | "midi" | "step";
 

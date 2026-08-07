@@ -91,7 +91,6 @@ const VOICE_EMOJI: Record<string, string> = {
 };
 
 const INSTRUMENTOS = Object.keys(VOICE_EMOJI);
-const INSTRUMENTOS_KEYS = INSTRUMENTOS;
 
 const INSERTS = [
   { label: "notas", text: " 1 2 3 4 5 6 7" },

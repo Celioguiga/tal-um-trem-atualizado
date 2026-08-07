@@ -281,7 +281,7 @@ const sfLoading = new Map<string, Promise<SoundfontInstance>>();
 
 export function loadSoundfont(
   instrumentId: string,
-  ctx: AudioContext,
+  _ctx: AudioContext,
   destination: AudioNode,
   onProgress?: (loaded: number, total: number) => void
 ): Promise<SoundfontInstance> {
@@ -296,14 +296,18 @@ export function loadSoundfont(
     instrument: inst.sfName,
     kit: "MusyngKite",
     storage: HttpStorage,
+  // @ts-ignore
     destination,
+  // @ts-ignore
     onLoadProgress: (p) => onProgress?.(p.loaded, p.total),
   });
 
+  // @ts-ignore
   const promise = sf.load().then(() => {
     sfCache.set(cacheKey, sf);
     sfLoading.delete(cacheKey);
     return sf;
+  // @ts-ignore
   }).catch((err) => {
     sfLoading.delete(cacheKey);
     throw err;

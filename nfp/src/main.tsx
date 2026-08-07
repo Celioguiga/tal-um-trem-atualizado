@@ -19,7 +19,7 @@ import { NfpPage } from "./components/nfp/NfpPage";
 import { RealTablaturaPage } from "./components/real-tablatura/RealTablaturaPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  useAuth();
   // if (!isAuthenticated) return <Navigate to="/" replace />;
   return <>{children}</>;
 }

@@ -194,6 +194,30 @@ CANTIGAS = [
 _PITCH = {1: "c'", 2: "d'", 3: "e'", 4: "f'", 5: "g'", 6: "a'", 7: "b'"}
 _DUR   = {"m": ("2", 2.0), "s": ("4", 1.0), "c": ("8", 0.5)}
 
+# ─────────────────────────────────────────────────────────────
+# INSTRUMENTOS DE CORDA / TABLATURA
+#   Ver biblia_cromus.md §9 — especificação validada com LilyPond real.
+#   Ativado por cantiga: adicione "instrumento": "ukulele" (e opcionalmente
+#   "afinacao": "sol_agudo" | "sol_grave") ao dicionário da cantiga.
+#   Sem essas chaves, gerar_ly() se comporta exatamente como antes.
+# ─────────────────────────────────────────────────────────────
+INSTRUMENTOS = {
+    "ukulele": {
+        "cordas": 4,
+        "afinacoes": {
+            "sol_agudo": {  # reentrante — padrão soprano/concerto
+                "label": "Sol agudo, Dó, Mi, Lá (reentrante — padrão)",
+                "lilypond": "#ukulele-tuning",
+            },
+            "sol_grave": {  # linear — comum no tenor
+                "label": "Sol grave, Dó, Mi, Lá (linear)",
+                "lilypond": r"\stringTuning <g c' e' a'>",
+            },
+        },
+        "afinacao_default": "sol_agudo",
+    },
+}
+
 
 def _slug(titulo: str) -> str:
     s = titulo.lower()
@@ -233,6 +257,75 @@ def _converter_notas(notas_str: str, compasso: str, compassos_por_linha: int) ->
 def gerar_ly(cantiga: dict, saida_ly: str, modo: str = "REAL") -> None:
     titulo     = cantiga["titulo"]
     compositor = cantiga.get("compositor", "")
+    instrumento_nome = cantiga.get("instrumento")
+
+    # ── MODO TABLATURA (instrumentos de corda) ──────────────────────
+    # Só ativa quando a cantiga define "instrumento" explicitamente.
+    # Pauta RNFG (colorida) em cima + tablatura embaixo, sincronizadas —
+    # a mesma música é usada nas duas. A tab mostra ritmo (\tabFullNotation)
+    # e os números de casa ganham a cor/forma do grau atrás (mesmo motor
+    # do cromus_header.ily, via cromus-tab-engraver-factory). Ver biblia §9.4.
+    if instrumento_nome:
+        if instrumento_nome not in INSTRUMENTOS:
+            raise ValueError(
+                f"Instrumento '{instrumento_nome}' não especificado em INSTRUMENTOS. "
+                f"Disponíveis: {', '.join(INSTRUMENTOS)}."
+            )
+        perfil = INSTRUMENTOS[instrumento_nome]
+        afinacao_nome = cantiga.get("afinacao", perfil["afinacao_default"])
+        if afinacao_nome not in perfil["afinacoes"]:
+            raise ValueError(
+                f"Afinação '{afinacao_nome}' não existe para '{instrumento_nome}'. "
+                f"Disponíveis: {', '.join(perfil['afinacoes'])}."
+            )
+        tuning_ly = perfil["afinacoes"][afinacao_nome]["lilypond"]
+
+        if "notas_ly_raw" in cantiga:
+            corpo_notas = cantiga["notas_ly_raw"]
+        else:
+            compasso    = cantiga["compasso"]
+            andamento   = cantiga.get("andamento", 80)
+            c_por_linha = cantiga.get("compassos_por_linha", 4)
+            notas_lily  = _converter_notas(cantiga["vozes"][0]["notas"], compasso, c_por_linha)
+            corpo_notas = (
+                f'\\time {compasso}\n'
+                f'\\tempo 4 = {andamento}\n\n'
+                f'{notas_lily}\n'
+            )
+
+        conteudo = (
+            '\\version "2.26.0"\n\n'
+            '\\include "cromus_header.ily"\n\n'
+            '\\header {\n'
+            f'  title    = "{titulo}"\n'
+            f'  composer = "{compositor}"\n'
+            '  tagline  = ##f\n'
+            '}\n\n'
+            '#(set-global-staff-size 32)\n\n'
+            f'musicaTab = {{\n{corpo_notas}\n}}\n\n'
+            '\\score {\n'
+            '  <<\n'
+            '    \\new Staff \\with {\n'
+            f'      \\consists #(cromus-engraver-factory "{modo}")\n'
+            '    } { \\clef treble \\musicaTab }\n'
+            '    \\new TabStaff \\with {\n'
+            f'      \\consists #(cromus-tab-engraver-factory "{modo}")\n'
+            '    } {\n'
+            f'      \\set TabStaff.stringTunings = {tuning_ly}\n'
+            '      \\tabFullNotation\n'
+            '      \\musicaTab\n'
+            '      \\bar "|."\n'
+            '    }\n'
+            '  >>\n'
+            '  \\layout { }\n'
+            '}\n'
+        )
+        os.makedirs(os.path.dirname(saida_ly), exist_ok=True)
+        with open(saida_ly, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+        return
+
+    # ── MODO PARTITURA RNFG (comportamento original — inalterado) ───
     usando_raw = "notas_ly_raw" in cantiga
     tem_letra  = usando_raw and "letra_ly" in cantiga
 
