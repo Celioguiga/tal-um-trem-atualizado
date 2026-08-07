@@ -31,6 +31,12 @@ bloco=f"""<script>
 {r("src/guitar_samples.js")}
 </script>
 <script>
+/* Amostras reais de ukulelê (Kala KA-CE concert scale), CC0 — ver
+   src/ukulele_samples.js para os créditos completos. Script à parte só
+   por tamanho (base64), mesmo escopo global dos demais. */
+{r("src/ukulele_samples.js")}
+</script>
+<script>
 "use strict";
 {r("src/app.js")}
 </script>"""

@@ -105,7 +105,10 @@ function scheduleDesenrolado(trilhasDesenroladas, bpm){
         while(ev[j]&&ev[j].tie&&ev[j].sameTie&&j+1<ev.length){
           dur+=ev[j+1].beats; skip.add(j+1); j++;
         }
-        out.push({time, midi:e.midi, dur:dur*spb, idx:k, track:t});
+        // TRANSPOSICAO_AUDIO (rng_tab_module.js) -- 0 pro violão (comportamento
+        // herdado, sempre tocou o MIDI escrito direto), +12 pro ukulelê (feature
+        // nova, sem soar na mesma altura do violão com timbre diferente só).
+        out.push({time, midi:e.midi+TRANSPOSICAO_AUDIO, dur:dur*spb, idx:k, track:t});
       }
       time += e.beats*spb;
     }

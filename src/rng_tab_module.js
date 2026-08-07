@@ -5,44 +5,56 @@
 ===================================================================== */
 
 /* ---------- instrumentos suportados: afinação, nº de cordas, transposição ----------
-   Violão é transpositor (grafado 1 oitava ACIMA do que soa — convenção padrão
-   de partitura pra violão). Ukulelê, pela convenção mais comum, soa NA
-   oitava escrita (sem transposição) — se a prática de vocês for outra, é só
-   ajustar `transposicao` abaixo.
-   cordas/cordasMidi vêm na ordem GRAVE→AGUDA da POSIÇÃO no braço (como já
-   era em CORDAS/CORDAS_MIDI) — violão 6ª→1ª; ukulelê reentrante 4ª→1ª (a
-   "4ª corda" nessa lista é a Sol, mesmo soando mais aguda que a 3ª/Dó — é
-   assim que a afinação reentrante funciona; só a ordem física no braço
-   importa aqui, não a altura relativa). */
+   `transposicao` é quanto SOMAR ao MIDI escrito (e.midi) pra achar o MIDI
+   REAL que o instrumento toca no braço — cada instrumento tem sua própria
+   relação entre "grafado" e "soa", e o catálogo de cantigas foi composto
+   mirando o registro grave do violão.
+   Violão: grafado 1 oitava ACIMA do que soa → -12 (desce).
+   Ukulelê: cordas soltas ficam bem mais agudas que as do violão (Dó4=60 até
+   Lá4=69) — a mesma nota escrita que cai confortável no violão (depois do
+   -12) ficaria ABAIXO de qualquer corda solta do ukulelê sem correção
+   nenhuma (tudo "fora"). Por isso o ukulelê SOBE 1 oitava → +12, sentido
+   oposto ao violão, pra cair no registro real do instrumento.
+
+   `transposicaoAudio` é a MESMA ideia, mas pro ÁUDIO (schedule() em app.js
+   e scheduleDesenrolado() em scrubber_module.js — o que toca de verdade,
+   Tone.Sampler). NÃO é sempre igual a `transposicao` (a do braço/tab): o
+   violão HISTORICAMENTE toca o MIDI escrito direto, sem descer a oitava no
+   áudio (0) — só a tab desce (-12); mudar isso agora mudaria como o violão
+   soa hoje, sem terem pedido. O ukulelê é feature nova, sem comportamento
+   herdado pra preservar — some 1 oitava tanto na tab quanto no áudio (+12
+   nos dois), senão toca na mesma altura do violão com timbre diferente só
+   (foi exatamente o bug reportado). */
 const INSTRUMENTOS = {
   violao: {
     nome: 'Violão', nCordas: 6,
     cordas:     [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.E ?? 4],
     cordasMidi: [40, 45, 50, 55, 59, 64],           // E2 A2 D3 G3 B3 E4
     nomes:      ['Mi','Lá','Ré','Sol','Si','Mi'],
-    nCasas: 12, transposicao: -12,
+    nCasas: 12, transposicao: -12, transposicaoAudio: 0,
   },
   ukulele: {
     nome: 'Ukulelê', nCordas: 4,
     cordas:     [SEMI.G ?? 7, SEMI.C ?? 0, SEMI.E ?? 4, SEMI.A ?? 9],
     cordasMidi: [67, 60, 64, 69],                   // G4 C4 E4 A4 (afinação padrão reentrante)
     nomes:      ['Sol','Dó','Mi','Lá'],
-    nCasas: 12, transposicao: 0,
+    nCasas: 12, transposicao: 12, transposicaoAudio: 12,
   },
 };
-let INSTRUMENTO_ATUAL = 'violao';
-let CORDAS       = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordas;
-let CORDAS_MIDI  = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordasMidi;
-let N_CORDAS     = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCordas;
-let NCASAS       = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCasas;
-let TRANSPOSICAO = INSTRUMENTOS[INSTRUMENTO_ATUAL].transposicao;
+let INSTRUMENTO_ATUAL   = 'violao';
+let CORDAS              = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordas;
+let CORDAS_MIDI         = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordasMidi;
+let N_CORDAS             = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCordas;
+let NCASAS               = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCasas;
+let TRANSPOSICAO         = INSTRUMENTOS[INSTRUMENTO_ATUAL].transposicao;
+let TRANSPOSICAO_AUDIO   = INSTRUMENTOS[INSTRUMENTO_ATUAL].transposicaoAudio;
 /* troca o instrumento ativo — chamar ANTES de desenhaTabInline (app.js faz
    isso no topo de render()). Chave desconhecida cai em violão. */
 function setInstrumento(key){
   const cfg = INSTRUMENTOS[key] || INSTRUMENTOS.violao;
   INSTRUMENTO_ATUAL = INSTRUMENTOS[key] ? key : 'violao';
   CORDAS = cfg.cordas; CORDAS_MIDI = cfg.cordasMidi; N_CORDAS = cfg.nCordas;
-  NCASAS = cfg.nCasas; TRANSPOSICAO = cfg.transposicao;
+  NCASAS = cfg.nCasas; TRANSPOSICAO = cfg.transposicao; TRANSPOSICAO_AUDIO = cfg.transposicaoAudio;
 }
 const midiDoCorda = (corda,casa) => CORDAS_MIDI[corda] + casa;
 
@@ -63,10 +75,9 @@ function posicoesPossiveis(pc, maxCasa){
    inteiro; se ainda assim nenhuma bater, cai pro pc mais próximo (oitava
    possivelmente errada) e marca fora=true. */
 function escolherPosicao(pc, alvoMidi, opcoesPreferidas, atual){
-  /* alguns instrumentos são transpositores (violão soa 1 oitava abaixo do
-     escrito na pauta) — a busca de posição mira no MIDI real do braço, não
-     no MIDI escrito (e.midi). TRANSPOSICAO vem do instrumento ativo (0 pra
-     quem não transpõe, ex. ukulelê). */
+  /* cada instrumento tem sua própria relação grafado↔soa (TRANSPOSICAO, ver
+     INSTRUMENTOS acima) — a busca de posição mira no MIDI REAL do braço,
+     não no MIDI escrito (e.midi) direto. */
   const alvoReal = alvoMidi + TRANSPOSICAO;
   let pool = opcoesPreferidas.filter(o=>midiDoCorda(o.corda,o.casa)===alvoReal);
   let fora = false;
@@ -95,26 +106,42 @@ function posicionaMelodia(pcs, midis, casaInicial){
 
 /* ---------- CAGED: 5 caixas fixas, ancoradas na corda que dá nome ao desenho ----------
    ⚠ Limites aproximados (didática CAGED padrão) — confira 1 desenho contra
-   referência antes de validar com aluno. */
+   referência antes de validar com aluno.
+   Uma tabela por instrumento — as 5 LETRAS são as mesmas no <select> (C/A/G/
+   E/D), mas a corda-âncora e a janela de casas mudam porque o braço é outro.
+   Violão (EADGBE): mapeamento igual desde sempre. Ukulelê (GCEA reentrante):
+   cada letra ainda usa a corda que "tem o nome dela" quando existe (C→corda
+   Dó, A→corda Lá, G→corda Sol, E→corda Mi); D não tem corda própria no
+   ukulelê, então ancora na corda Dó (mesma lógica do acorde de Ré aberto no
+   ukulelê: Sol(2)-Dó(2)-Mi(2)-Lá(0), fundamental cai na corda Dó). */
 const CAGED_SHAPES = {
-  C: { nome:'Dó (C)',  corda:1, offsetMin:-3, offsetMax:1 },
-  A: { nome:'Lá (A)',  corda:1, offsetMin:-1, offsetMax:3 },
-  G: { nome:'Sol (G)', corda:0, offsetMin:-2, offsetMax:2 },
-  E: { nome:'Mi (E)',  corda:0, offsetMin:0,  offsetMax:4 },
-  D: { nome:'Ré (D)',  corda:2, offsetMin:-2, offsetMax:2 },
+  violao: {
+    C: { nome:'Dó (C)',  corda:1, offsetMin:-3, offsetMax:1 },
+    A: { nome:'Lá (A)',  corda:1, offsetMin:-1, offsetMax:3 },
+    G: { nome:'Sol (G)', corda:0, offsetMin:-2, offsetMax:2 },
+    E: { nome:'Mi (E)',  corda:0, offsetMin:0,  offsetMax:4 },
+    D: { nome:'Ré (D)',  corda:2, offsetMin:-2, offsetMax:2 },
+  },
+  ukulele: {
+    C: { nome:'Dó (C)',  corda:1, offsetMin:-2, offsetMax:2 },  // corda Dó (índice 1: Sol-Dó-Mi-Lá)
+    A: { nome:'Lá (A)',  corda:3, offsetMin:-2, offsetMax:2 },  // corda Lá
+    G: { nome:'Sol (G)', corda:0, offsetMin:-2, offsetMax:2 },  // corda Sol
+    E: { nome:'Mi (E)',  corda:2, offsetMin:-2, offsetMax:2 },  // corda Mi
+    D: { nome:'Ré (D)',  corda:1, offsetMin:-2, offsetMax:2 },  // corda Dó (acorde de Ré aberto: 2-2-2-0)
+  },
 };
 function casaFundamental(pc, corda){
   for(let f=0; f<=NCASAS; f++) if((CORDAS[corda]+f)%12 === pc) return f;
   return 0;
 }
 function janelaCaged(tonicaPc, shapeKey){
-  const sh = CAGED_SHAPES[shapeKey];
+  const sh = CAGED_SHAPES[INSTRUMENTO_ATUAL][shapeKey];
   const base = casaFundamental(tonicaPc, sh.corda);
   return { min: Math.max(0, base+sh.offsetMin), max: Math.min(NCASAS, base+sh.offsetMax) };
 }
 function posicionaMelodiaCaged(pcs, midis, tonicaPc, shapeKey){
   const jan = janelaCaged(tonicaPc, shapeKey);
-  let atual = {corda: CAGED_SHAPES[shapeKey].corda, casa: jan.min};
+  let atual = {corda: CAGED_SHAPES[INSTRUMENTO_ATUAL][shapeKey].corda, casa: jan.min};
   return pcs.map((pc,k)=>{
     let opcoesJanela = posicoesPossiveis(pc).filter(o=>o.casa>=jan.min && o.casa<=jan.max);
     const foraJanela = !opcoesJanela.length;
@@ -330,7 +357,7 @@ function desenhaTab(destino, events, tonicaPc, opts){
   }
   s += `<text x="${W-16}" y="${18+HEADER_H*0.5}" font-size="11" fill="${texto}" text-anchor="end" font-family="IBM Plex Mono, monospace" letter-spacing="0.06em">REAL TABLATURA</text>`;
 
-  if(modo==='caged') s += `<text x="${X0-30}" y="${Y0-22}" fill="${texto}" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">Desenho ${CAGED_SHAPES[shape].nome}</text>`;
+  if(modo==='caged') s += `<text x="${X0-30}" y="${Y0-22}" fill="${texto}" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">Desenho ${CAGED_SHAPES[INSTRUMENTO_ATUAL][shape].nome}</text>`;
 
   for(let c=0;c<6;c++){
     const y = linhaY(c);
@@ -505,7 +532,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         frag += `<text x="${xIni+16}" y="${lineTop-2}" font-size="15" font-weight="700" fill="#222" font-family="Georgia, serif">/${partes[1]||''}</text>`;
       }
       if(armadura) frag += `<text x="${xIni+50}" y="${lineTop-4}" font-size="11" fill="${texto}" font-family="IBM Plex Mono, monospace">${armadura}</text>`;
-      if(modo==='caged') frag += `<text x="${xFim-120}" y="${lineTop-4}" font-size="11" fill="${texto}" font-family="IBM Plex Mono, monospace" font-weight="600">Desenho ${CAGED_SHAPES[shape].nome}</text>`;
+      if(modo==='caged') frag += `<text x="${xFim-120}" y="${lineTop-4}" font-size="11" fill="${texto}" font-family="IBM Plex Mono, monospace" font-weight="600">Desenho ${CAGED_SHAPES[INSTRUMENTO_ATUAL][shape].nome}</text>`;
     }
 
     for(let c=0;c<N_CORDAS;c++){

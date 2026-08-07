@@ -19,24 +19,17 @@ function tonicaPc(key){
 }
 function getTabOpts(){
   const v=$("selModoTab").value;
-  // CAGED é desenho de acorde de violão (6 cordas) — instrumento diferente
-  // de violão sempre usa "mais próxima", mesmo que o <select> ainda esteja
-  // com uma forma CAGED marcada de uma troca de instrumento anterior.
-  if(instrumentoAtual!=='violao') return {modo:'proxima'};
   return v==='proxima' ? {modo:'proxima'} : {modo:'caged', shape:v};
 }
 
 /* ---- Instrumento (Violão/Ukulelê, ver INSTRUMENTOS em rng_tab_module.js) ----
    Seletor injetado via JS (não depende de mudança no shell.html — evita
-   descompasso entre os dois arquivos). Só afeta a Real Tablatura (afinação/
-   nº de cordas); pauta e áudio continuam iguais por enquanto — ver nota em
-   ensureSynth() sobre amostras. */
+   descompasso entre os dois arquivos). Afeta a Real Tablatura inteira
+   (afinação/nº de cordas/transposição/CAGED — CAGED_SHAPES em
+   rng_tab_module.js tem uma tabela por instrumento, mesmas 5 letras C/A/G/
+   E/D no <select>); pauta e áudio continuam iguais por enquanto — ver nota
+   em ensureSynth() sobre amostras. */
 let instrumentoAtual = 'violao';
-function atualizarVisibilidadeCaged(){
-  const sel=$("selModoTab"); if(!sel) return;
-  [...sel.options].forEach(o=>{ if(o.value!=='proxima') o.disabled = instrumentoAtual!=='violao'; });
-  if(instrumentoAtual!=='violao' && sel.value!=='proxima') sel.value='proxima';
-}
 (function(){
   const tomEl=$("tom");
   if(!tomEl || document.getElementById("instrumento")) return; // sem #tom no shell, ou já existe -- não injeta 2x
@@ -47,7 +40,6 @@ function atualizarVisibilidadeCaged(){
   tomEl.insertAdjacentElement("afterend", wrap);
   document.getElementById("instrumento").addEventListener("change",e=>{
     instrumentoAtual=e.target.value;
-    atualizarVisibilidadeCaged();
     render();
   });
 })();
@@ -155,7 +147,7 @@ function render(){
       halos[t][i]=h;
       if(a.g)a.g.addEventListener("click",async()=>{
         await Tone.start();await ensureSynth();
-        synth.triggerAttackRelease(Tone.Frequency(a.midi,"midi"),0.4);
+        synth.triggerAttackRelease(Tone.Frequency(a.midi+TRANSPOSICAO_AUDIO,"midi"),0.4);
         h.setAttribute("opacity",".28");setTimeout(()=>h.setAttribute("opacity","0"),350);
       });
     });
@@ -197,15 +189,24 @@ function acompanharScroll(idx){
   clearTimeout(scrollProgramaticoT);
   scrollProgramaticoT=setTimeout(()=>{scrollProgramatico=false;},1000);
 }
-/* Tone.Sampler com amostras reais de violão nylon (GUITAR_SAMPLES_NYLON,
-   src/guitar_samples.js) — poliphônico por natureza (várias notas podem
-   soar juntas), mesma assinatura de triggerAttackRelease do Synth antigo,
-   sem mudar nenhum outro call site além de precisar de await (carrega as
-   amostras de forma assíncrona, mesmo vindo de data: URI embutido — não
-   há requisição de rede, só decodificação). Ver também o segundo ponto em
-   exportWav(). */
+/* Tone.Sampler com amostras reais — violão nylon (GUITAR_SAMPLES_NYLON,
+   src/guitar_samples.js) ou ukulelê (UKULELE_SAMPLES_KALA,
+   src/ukulele_samples.js), conforme instrumentoAtual — poliphônico por
+   natureza (várias notas podem soar juntas), mesma assinatura de
+   triggerAttackRelease do Synth antigo, sem mudar nenhum outro call site
+   além de precisar de await (carrega as amostras de forma assíncrona,
+   mesmo vindo de data: URI embutido — não há requisição de rede, só
+   decodificação). Ver também o segundo ponto em exportWav(). */
+function samplesDoInstrumento(){
+  return instrumentoAtual==='ukulele' ? UKULELE_SAMPLES_KALA : GUITAR_SAMPLES_NYLON;
+}
+let synthInstrumento=null; // qual instrumento o `synth` cacheado hoje toca -- troca de instrumento invalida e reconstrói
 function ensureSynth(){
-  if(!synth)synth=new Tone.Sampler({urls:GUITAR_SAMPLES_NYLON,release:0.8}).toDestination();
+  if(!synth||synthInstrumento!==instrumentoAtual){
+    if(synth)synth.dispose();
+    synth=new Tone.Sampler({urls:samplesDoInstrumento(),release:0.8}).toDestination();
+    synthInstrumento=instrumentoAtual;
+  }
   return Tone.loaded();
 }
 /* sequência de OCORRÊNCIAS pra tocar, de UMA trilha: cada compasso de
@@ -236,7 +237,7 @@ function schedule(){
         let dur=e.beats,j=k;
         while(tr.events[seq[j]].tie&&tr.events[seq[j]].sameTie&&j+1<seq.length){
           dur+=tr.events[seq[j+1]].beats;skip.add(j+1);j++;}
-        out.push({time,midi:e.midi,dur:dur*spb,idx,track:t});
+        out.push({time,midi:e.midi+TRANSPOSICAO_AUDIO,dur:dur*spb,idx,track:t});
       }
       time+=e.beats*spb;
     }
@@ -318,7 +319,6 @@ function fromCode(code){
       else if(k==="instrumento"&&INSTRUMENTOS[v]){
         instrumentoAtual=v;
         const sel=document.getElementById("instrumento");if(sel)sel.value=v;
-        atualizarVisibilidadeCaged();
       }
     }else body.push(ln);
   }
@@ -345,7 +345,7 @@ async function exportWav(){
          o WAV sai com o synth antigo (ou vice-versa), sem erro nenhum pra
          avisar. Precisa esperar carregar (Tone.loaded()) ANTES de agendar os
          triggerAttackRelease — offline não espera sozinho. */
-      const s=new Tone.Sampler({urls:GUITAR_SAMPLES_NYLON,release:0.8}).toDestination();
+      const s=new Tone.Sampler({urls:samplesDoInstrumento(),release:0.8}).toDestination();
       await Tone.loaded();
       sched.forEach(e=>s.triggerAttackRelease(Tone.Frequency(e.midi,"midi"),e.dur*0.92,e.time));
     },total+0.8);
