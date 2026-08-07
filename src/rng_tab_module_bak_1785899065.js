@@ -4,46 +4,11 @@
    e LETTERS que já existem ali — NÃO redefine cor/forma, R3 respeitada).
 ===================================================================== */
 
-/* ---------- instrumentos suportados: afinação, nº de cordas, transposição ----------
-   Violão é transpositor (grafado 1 oitava ACIMA do que soa — convenção padrão
-   de partitura pra violão). Ukulelê, pela convenção mais comum, soa NA
-   oitava escrita (sem transposição) — se a prática de vocês for outra, é só
-   ajustar `transposicao` abaixo.
-   cordas/cordasMidi vêm na ordem GRAVE→AGUDA da POSIÇÃO no braço (como já
-   era em CORDAS/CORDAS_MIDI) — violão 6ª→1ª; ukulelê reentrante 4ª→1ª (a
-   "4ª corda" nessa lista é a Sol, mesmo soando mais aguda que a 3ª/Dó — é
-   assim que a afinação reentrante funciona; só a ordem física no braço
-   importa aqui, não a altura relativa). */
-const INSTRUMENTOS = {
-  violao: {
-    nome: 'Violão', nCordas: 6,
-    cordas:     [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.E ?? 4],
-    cordasMidi: [40, 45, 50, 55, 59, 64],           // E2 A2 D3 G3 B3 E4
-    nomes:      ['Mi','Lá','Ré','Sol','Si','Mi'],
-    nCasas: 12, transposicao: -12,
-  },
-  ukulele: {
-    nome: 'Ukulelê', nCordas: 4,
-    cordas:     [SEMI.G ?? 7, SEMI.C ?? 0, SEMI.E ?? 4, SEMI.A ?? 9],
-    cordasMidi: [67, 60, 64, 69],                   // G4 C4 E4 A4 (afinação padrão reentrante)
-    nomes:      ['Sol','Dó','Mi','Lá'],
-    nCasas: 12, transposicao: 0,
-  },
-};
-let INSTRUMENTO_ATUAL = 'violao';
-let CORDAS       = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordas;
-let CORDAS_MIDI  = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordasMidi;
-let N_CORDAS     = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCordas;
-let NCASAS       = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCasas;
-let TRANSPOSICAO = INSTRUMENTOS[INSTRUMENTO_ATUAL].transposicao;
-/* troca o instrumento ativo — chamar ANTES de desenhaTabInline (app.js faz
-   isso no topo de render()). Chave desconhecida cai em violão. */
-function setInstrumento(key){
-  const cfg = INSTRUMENTOS[key] || INSTRUMENTOS.violao;
-  INSTRUMENTO_ATUAL = INSTRUMENTOS[key] ? key : 'violao';
-  CORDAS = cfg.cordas; CORDAS_MIDI = cfg.cordasMidi; N_CORDAS = cfg.nCordas;
-  NCASAS = cfg.nCasas; TRANSPOSICAO = cfg.transposicao;
-}
+/* ---------- violão: afinação padrão, cordas 6ª→1ª, em pitch class ---------- */
+const CORDAS = [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.E ?? 4];
+/* mesma afinação, em MIDI absoluto (E2 A2 D3 G3 B3 E4) — usada pra bater a oitava exata */
+const CORDAS_MIDI = [40, 45, 50, 55, 59, 64];
+const NCASAS = 12;
 const midiDoCorda = (corda,casa) => CORDAS_MIDI[corda] + casa;
 
 /* pitch class de um evento da pauta (e.letter + e.acc, já vêm do buildScore) */
@@ -53,7 +18,7 @@ function pcDoEvento(e){ return ((SEMI[e.letter] ?? 0) + (e.acc||0) + 12) % 12; }
 function posicoesPossiveis(pc, maxCasa){
   maxCasa = maxCasa ?? NCASAS;
   const opcoes = [];
-  for(let c=0;c<N_CORDAS;c++) for(let f=0; f<=maxCasa; f++)
+  for(let c=0;c<6;c++) for(let f=0; f<=maxCasa; f++)
     if((CORDAS[c]+f)%12 === pc) opcoes.push({corda:c, casa:f});
   return opcoes;
 }
@@ -63,11 +28,9 @@ function posicoesPossiveis(pc, maxCasa){
    inteiro; se ainda assim nenhuma bater, cai pro pc mais próximo (oitava
    possivelmente errada) e marca fora=true. */
 function escolherPosicao(pc, alvoMidi, opcoesPreferidas, atual){
-  /* alguns instrumentos são transpositores (violão soa 1 oitava abaixo do
-     escrito na pauta) — a busca de posição mira no MIDI real do braço, não
-     no MIDI escrito (e.midi). TRANSPOSICAO vem do instrumento ativo (0 pra
-     quem não transpõe, ex. ukulelê). */
-  const alvoReal = alvoMidi + TRANSPOSICAO;
+  /* violão é transpositor: soa 1 oitava abaixo do escrito na pauta — a busca de
+     posição mira no MIDI real do braço, não no MIDI escrito (e.midi) */
+  const alvoReal = alvoMidi - 12;
   let pool = opcoesPreferidas.filter(o=>midiDoCorda(o.corda,o.casa)===alvoReal);
   let fora = false;
   if(!pool.length){
@@ -85,7 +48,7 @@ function escolherPosicao(pc, alvoMidi, opcoesPreferidas, atual){
 }
 /* modo "mais próxima": MIDI exato manda; deslocamento de casa/corda só desempata */
 function posicionaMelodia(pcs, midis, casaInicial){
-  let atual = {corda: Math.floor(N_CORDAS/2), casa: casaInicial ?? 0};
+  let atual = {corda: 2, casa: casaInicial ?? 0};
   return pcs.map((pc,k)=>{
     const p = escolherPosicao(pc, midis[k], posicoesPossiveis(pc), atual);
     atual = p;
@@ -198,10 +161,9 @@ function nivelFlags(code){ return {8:1,16:2,32:3,64:4}[code] || 0; }
 /* deslocamento horizontal do encaixe da haste na nota: pra cima encaixa pela
    direita, pra baixo pela esquerda — convenção padrão de partitura */
 const STEM_DX = 4;
-/* direção pela corda: metade aguda (índices altos) pra cima, metade grave
-   (índices baixos) pra baixo — generalizado pro nº de cordas do instrumento
-   ativo (violão: 3/3; ukulelê: 2/2). -1=cima, 1=baixo */
-function direcaoHaste(corda){ return corda>=N_CORDAS/2 ? -1 : 1; }
+/* direção pela corda: as 3 cordas agudas (Sol/Si/Mi aguda, índices 3-5) pra
+   cima; as 3 graves (Mi grave/Lá/Ré, índices 0-2) pra baixo. -1=cima, 1=baixo */
+function direcaoHaste(corda){ return corda>=3 ? -1 : 1; }
 /* haste — direção inferida do sinal de (yTopo-yBase): sobe (yTopo<yBase) ou
    desce (yTopo>yBase). nFlags>0 empilha colchetes perto da ponta, voltando
    em direção à nota — usada tanto pra nota solta quanto dentro de um beam
@@ -288,10 +250,6 @@ function desenhaBeam(x1, x2, yBeam, nivel, cor, dir){
    tonicaPc — pitch class da tônica (pra CAGED). Se vier de key.spec,
               calcule com: (SEMI[key.tonicLetter] + sinal) % 12
    opts     — { modo:'proxima'|'caged', shape:'C'|'A'|'G'|'E'|'D', claro:bool }
-
-   ⚠️ LEGADO — mantida só como referência histórica, NÃO é chamada pelo
-   app.js hoje (ele chama desenhaTabInline, mais abaixo). Não editar sem
-   necessidade explícita de usar o modo standalone de novo.
 ===================================================================== */
 function desenhaTab(destino, events, tonicaPc, opts){
   opts = opts || {};
@@ -383,7 +341,6 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
   const armadura = opts.armadura || '';
   const texto='#666', linhaCor='#999', barraCor='#333';
   const warns = [];
-  const pecaTemCoda = measures.some(m=>m.coda);
 
   /* prepara, por trilha: idxNotas/idxPausas/posições/posPorIdx/tabHalos/suprimidos/
      gruposRitmo — mesmo cálculo que já existia, só rodado 1x por trilha. Trilha
@@ -486,12 +443,12 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
   });
 
   const ALT=15, PAD=22, STEM_H=22;
-  const nomesCordas = INSTRUMENTOS[INSTRUMENTO_ATUAL].nomes;
+  const nomesCordas=['Mi','Lá','Ré','Sol','Si','Mi'];
   const nLines = Math.ceil(measureBoxes.length/perLine);
 
   for(let line=0; line<nLines; line++){
     const lineTop = topY + line*rowH;
-    const linhaY = corda => lineTop + PAD + (N_CORDAS-1-corda)*ALT;
+    const linhaY = corda => lineTop + PAD + (5-corda)*ALT;
 
     const mStart = line*perLine, mEnd = Math.min(mStart+perLine, measureBoxes.length)-1;
     const xIni = measureBoxes[mStart].x - 32;
@@ -508,14 +465,14 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
       if(modo==='caged') frag += `<text x="${xFim-120}" y="${lineTop-4}" font-size="11" fill="${texto}" font-family="IBM Plex Mono, monospace" font-weight="600">Desenho ${CAGED_SHAPES[shape].nome}</text>`;
     }
 
-    for(let c=0;c<N_CORDAS;c++){
+    for(let c=0;c<6;c++){
       const y=linhaY(c);
       frag += `<line x1="${xIni}" y1="${y}" x2="${xFim}" y2="${y}" stroke="${linhaCor}" stroke-width="${1.4-c*0.12}"/>`;
       frag += `<text x="${xIni-24}" y="${y+4}" font-size="10" fill="${texto}" font-family="IBM Plex Mono, monospace" font-weight="600">${nomesCordas[c]}</text>`;
     }
     for(let mi=mStart; mi<=mEnd; mi++){
       const box=measureBoxes[mi];
-      const y1=linhaY(N_CORDAS-1)-7, y2=linhaY(0)+7;
+      const y1=linhaY(5)-7, y2=linhaY(0)+7;
       const prevM = mi>mStart ? measures[mi-1] : null;
       if(prevM && prevM.repeatEnd){
         frag += glifoRepeticao(box.x,'end',y1,y2,barraCor);
@@ -527,7 +484,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         frag += `<line x1="${box.x}" y1="${y1}" x2="${box.x}" y2="${y2}" stroke="${barraCor}" stroke-width="1.2"/>`;
       }
     }
-    { const mEndM=measures[mEnd], yF1=linhaY(N_CORDAS-1)-7, yF2=linhaY(0)+7;
+    { const mEndM=measures[mEnd], yF1=linhaY(5)-7, yF2=linhaY(0)+7;
       if(mEndM.repeatEnd){
         frag += glifoRepeticao(xFim,'end',yF1,yF2,barraCor);
       }else if(mEndM.endBar || mEnd===measures.length-1){
@@ -540,7 +497,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
     { let segIni=null, segVolta=0;
       const fecharSegmento=(fimMi)=>{
         const x1=measureBoxes[segIni].x, x2=measureBoxes[fimMi].x+measureBoxes[fimMi].width;
-        const y=linhaY(N_CORDAS-1)-12;
+        const y=linhaY(5)-12;
         const hookIni=voltaInfo[segIni].first, hookFim=voltaInfo[fimMi].last;
         frag += traceVolta(x1,x2,y,hookIni,hookFim,hookIni?segVolta+'.':'',barraCor,texto);
       };
@@ -553,23 +510,6 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         }
       }
       if(segVolta) fecharSegmento(mEnd);
-    }
-
-    // ---- Segno / D.S. / Fine / Coda: texto acima do compasso, mesmo padrão dos
-    // rótulos de casa (traceVolta) — sem depender de glifo SMuFL.
-    for(let mi=mStart; mi<=mEnd; mi++){
-      const ms=measures[mi];
-      if(!(ms.segno||ms.dalSegno||ms.fine||ms.toCoda||ms.coda)) continue;
-      const box=measureBoxes[mi];
-      const labels=[];
-      if(ms.segno)    labels.push('Segno');
-      if(ms.dalSegno) labels.push(ms.fine?'D.S. al Fine':pecaTemCoda?'D.S. al Coda':'D.S.');
-      if(ms.fine)     labels.push('Fine');
-      if(ms.toCoda)   labels.push('⊕ To Coda');
-      if(ms.coda)     labels.push('⊕ Coda');
-      labels.forEach((txt,li)=>{
-        frag += `<text x="${box.x+2}" y="${lineTop-8-li*11}" font-size="10" font-weight="700" fill="${barraCor}" font-family="IBM Plex Mono, monospace">${txt}</text>`;
-      });
     }
 
     const g=mk('g',{class:'real-tab-line'});
@@ -655,7 +595,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         if(Math.floor(e.measure/perLine)!==line) return;
         const x = restAnchors[idx];
         if(x==null) return;
-        const yCentro = linhaY((N_CORDAS-1)/2);
+        const yCentro = linhaY(2.5);
         g.insertAdjacentHTML('beforeend', glifoPausaVexFlow(e.code,x,yCentro,barraCor));
       });
     });

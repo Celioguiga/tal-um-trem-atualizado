@@ -2,10 +2,6 @@
 const VF=Vex.Flow;
 let lastTracks=[],lastPlayOrder=[],halos=[],tabHalos=[],synth=null;
 let layoutAtual=null,autoScrollAtivo=true,scrollProgramatico=false,scrollProgramaticoT=null;
-/* modo scrubber (rolagem contínua) — ver scrubber_module.js. Estado
-   próprio, separado do modo paginado (halos/layoutAtual acima), pra não
-   arriscar regressão no que já funciona. */
-let modoScrubber=false, scrubberLayout=null, scrubberHalos=[];
 const $=id=>document.getElementById(id);
 const getMode=()=>document.querySelector('input[name="modo"]:checked').value;
 const KEY_LABEL={C:"Dó maior",G:"Sol maior",D:"Ré maior",A:"Lá maior",E:"Mi maior",F:"Fá maior",
@@ -19,38 +15,8 @@ function tonicaPc(key){
 }
 function getTabOpts(){
   const v=$("selModoTab").value;
-  // CAGED é desenho de acorde de violão (6 cordas) — instrumento diferente
-  // de violão sempre usa "mais próxima", mesmo que o <select> ainda esteja
-  // com uma forma CAGED marcada de uma troca de instrumento anterior.
-  if(instrumentoAtual!=='violao') return {modo:'proxima'};
   return v==='proxima' ? {modo:'proxima'} : {modo:'caged', shape:v};
 }
-
-/* ---- Instrumento (Violão/Ukulelê, ver INSTRUMENTOS em rng_tab_module.js) ----
-   Seletor injetado via JS (não depende de mudança no shell.html — evita
-   descompasso entre os dois arquivos). Só afeta a Real Tablatura (afinação/
-   nº de cordas); pauta e áudio continuam iguais por enquanto — ver nota em
-   ensureSynth() sobre amostras. */
-let instrumentoAtual = 'violao';
-function atualizarVisibilidadeCaged(){
-  const sel=$("selModoTab"); if(!sel) return;
-  [...sel.options].forEach(o=>{ if(o.value!=='proxima') o.disabled = instrumentoAtual!=='violao'; });
-  if(instrumentoAtual!=='violao' && sel.value!=='proxima') sel.value='proxima';
-}
-(function(){
-  const tomEl=$("tom");
-  if(!tomEl || document.getElementById("instrumento")) return; // sem #tom no shell, ou já existe -- não injeta 2x
-  const wrap=document.createElement("span");
-  wrap.style.marginLeft="8px";
-  wrap.innerHTML=`<label style="margin-right:4px">Instrumento:</label>
-    <select id="instrumento"><option value="violao">Violão</option><option value="ukulele">Ukulelê</option></select>`;
-  tomEl.insertAdjacentElement("afterend", wrap);
-  document.getElementById("instrumento").addEventListener("change",e=>{
-    instrumentoAtual=e.target.value;
-    atualizarVisibilidadeCaged();
-    render();
-  });
-})();
 
 (function(){const d=$("markDots");
   for(const L of LETTERS){const i=document.createElement("i");i.style.background=RNG_MAPPER.cores[L];d.appendChild(i);}})();
@@ -73,11 +39,10 @@ function buildLegend(){
 
 function render(){
   stopPlayback();
-  setInstrumento(instrumentoAtual);
   buildLegend();
   const av=$("avisos");av.innerHTML="";
   const box=$("score");box.innerHTML="";
-  halos=[];tabHalos=[];scrubberHalos=[];scrubberLayout=null;
+  halos=[];tabHalos=[];
 
   const titulo=$("titulo").value.trim()||"Sem Título";
   const ts=$("compasso").value, [tsNum,tsDen]=ts.split("/").map(Number);
@@ -95,35 +60,6 @@ function render(){
   if(!lastTracks.some(tr=>tr.events.length)){av.innerHTML='<span class="err">Nada para renderizar — confira a sintaxe.</span>';return;}
 
   const armaduraLabel = KEY_LABEL[$("tom").value] + " · " + (key.sig>0 ? key.sig+'♯' : key.sig<0 ? (-key.sig)+'♭' : 'sem alteração');
-
-  // ---- modo scrubber: caminho totalmente separado do paginado (ver
-  // scrubber_module.js) — não toca em nada do bloco de baixo.
-  if(modoScrubber){
-    box.classList.add('scrubber-ativo');
-    let scrubResult;
-    try{
-      scrubResult = renderScrubber(VF, document, mkEl, box, lastTracks, lastPlayOrder, {
-        tsNum, tsDen, ts, key, mode:getMode(),
-        title:titulo, subtitle:`${ts} · ♩=${bpm} · ${KEY_LABEL[$("tom").value]} · Synemusic`,
-        tonicaPc: tonicaPc(key), compasso: ts, armadura: armaduraLabel, tabOpts: getTabOpts(),
-      });
-    }catch(err){
-      av.innerHTML='<span class="err">Erro na gravura (scrubber): '+err.message+"</span>";return;
-    }
-    scrubberLayout = scrubResult;
-    scrubberHalos = scrubResult.out.tracks.map(trackOut=>
-      trackOut.anchors.map(a=>{
-        if(!a) return null;
-        const h=mkEl("circle",{cx:a.cx,cy:a.cy,r:11,fill:a.cor,opacity:0,"pointer-events":"none"});
-        scrubResult.out.svg.insertBefore(h, scrubResult.out.svg.firstChild);
-        return h;
-      })
-    );
-    const ws=(scrubResult.tabWarns||[]);
-    if(ws.length) av.innerHTML=ws.map(w=>"⚠ "+w).join("<br>");
-    return;
-  }
-  box.classList.remove('scrubber-ativo');
 
   const width=Math.max(box.clientWidth||760,560);
   let out;
@@ -169,13 +105,6 @@ function render(){
 function pintarHalo(t,idx,op){
   const h=halos[t]&&halos[t][idx];if(h)h.setAttribute("opacity",op);
   const th=tabHalos[t]&&tabHalos[t][idx];if(th)th.setAttribute("opacity",op);
-}
-/* mesma ideia de pintarHalo, mas pros arrays próprios do modo scrubber
-   (halos/tabHalos indexados pela sequência DESENROLADA, não pela original —
-   uma nota de repetição tem 2 posições/halos diferentes na tela). */
-function pintarHaloScrubber(t,idx,op){
-  const h=scrubberHalos[t]&&scrubberHalos[t][idx];if(h)h.setAttribute("opacity",op);
-  const th=scrubberLayout&&scrubberLayout.tracksTabHalos[t]&&scrubberLayout.tracksTabHalos[t][idx];if(th)th.setAttribute("opacity",op);
 }
 /* rola #score pra manter a nota atual visível — só mexe se o alvo já não
    estiver dentro da área visível (modo "página", não segue nota a nota).
@@ -248,42 +177,11 @@ function schedule(){
 function stopPlayback(){
   try{Tone.Transport.stop();Tone.Transport.cancel();}catch(_){}
   lastTracks.forEach((tr,t)=>{for(let i=0;i<tr.events.length;i++)pintarHalo(t,i,"0");});
-  if(scrubberLayout){
-    scrubberLayout.trilhasDesenroladas.forEach((tr,t)=>{for(let i=0;i<tr.events.length;i++)pintarHaloScrubber(t,i,"0");});
-  }
 }
 async function play(){
   if(!lastTracks.length||!lastTracks.some(tr=>tr.events.length))return;
   await Tone.start();stopPlayback();await ensureSynth();
   autoScrollAtivo=true;
-
-  // ---- modo scrubber: schedule próprio (scheduleDesenrolado), halos
-  // próprios, rolagem própria (acompanharScrubber) — não usa nada do
-  // caminho paginado abaixo.
-  if(modoScrubber){
-    if(!scrubberLayout) return;
-    const bpm=+$("andamento").value||80;
-    const {sched,total}=scheduleDesenrolado(scrubberLayout.trilhasDesenroladas, bpm);
-    if(!sched.length) return;
-    const box=$("score");
-    sched.forEach(s=>{
-      Tone.Transport.scheduleOnce(time=>{
-        synth.triggerAttackRelease(Tone.Frequency(s.midi,"midi"),s.dur*0.92,time);
-        Tone.Draw.schedule(()=>{
-          pintarHaloScrubber(s.track,s.idx,".26");
-          if(s.track===0){
-            const a=scrubberLayout.out.tracks[0].anchors[s.idx];
-            if(a) acompanharScrubber(box,a.cx,true);
-          }
-        },time);
-        Tone.Draw.schedule(()=>pintarHaloScrubber(s.track,s.idx,"0"),time+s.dur*0.9);
-      },s.time);
-    });
-    Tone.Transport.scheduleOnce(()=>stopPlayback(),total+0.4);
-    Tone.Transport.start();
-    return;
-  }
-
   const {sched,total}=schedule();
   sched.forEach(s=>{
     Tone.Transport.scheduleOnce(time=>{
@@ -298,7 +196,7 @@ async function play(){
 
 /* ---------- código da cantiga ---------- */
 function toCode(){
-  return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n@instrumento: ${instrumentoAtual}\n\n${$("cromus").value}`;
+  return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n\n${$("cromus").value}`;
 }
 function fromCode(code){
   /* cabeçalho (@titulo/@compasso/@tom/@andamento) só é reconhecido ANTES da 1ª linha em
@@ -315,11 +213,6 @@ function fromCode(code){
       else if(k==="compasso"&&compassosValidos.includes(v))$("compasso").value=v;
       else if(k==="tom"&&KEYS[v]!==undefined)$("tom").value=v;
       else if(k==="andamento")$("andamento").value=parseInt(v)||80;
-      else if(k==="instrumento"&&INSTRUMENTOS[v]){
-        instrumentoAtual=v;
-        const sel=document.getElementById("instrumento");if(sel)sel.value=v;
-        atualizarVisibilidadeCaged();
-      }
     }else body.push(ln);
   }
   const cr=body.join("\n").trim();
@@ -331,7 +224,7 @@ function download(name,blob){
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 }
 const slug=()=>($("titulo").value.trim()||"cantiga").toLowerCase().normalize("NFD")
-  .replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
+  .replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
 
 /* ---------- WAV (render offline) ---------- */
 async function exportWav(){
@@ -408,15 +301,3 @@ document.getElementById("selModoTab").addEventListener("change", render);
    (scroll não disparado por acompanharScroll), desliga o auto-scroll até
    o próximo play() reativar do zero */
 $("score").addEventListener("scroll",()=>{ if(!scrollProgramatico) autoScrollAtivo=false; });
-
-/* botão de alternância Paginado/Scrubber — ⚠️ precisa existir em shell.html
-   um elemento <button id="btnScrubber">. Se não existir ainda, este listener
-   simplesmente não pega (optional chaining), sem erro — nada quebra, só o
-   modo scrubber fica inacessível até o botão ser adicionado. */
-document.getElementById("btnScrubber")?.addEventListener("click",()=>{
-  modoScrubber=!modoScrubber;
-  const b=document.getElementById("btnScrubber");
-  b.classList.toggle("ativo",modoScrubber);
-  b.textContent = modoScrubber ? "📜 Ver paginado" : "🎬 Ver scrubber";
-  render();
-});

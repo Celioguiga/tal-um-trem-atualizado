@@ -10,11 +10,7 @@ function renderScore(VF, doc, container, trilhas, opts){
   const NSVG="http://www.w3.org/2000/svg";
   const mk=(t,a)=>{const e=doc.createElementNS(NSVG,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
 
-  // opts.perLineOverride: usado pelo modo scrubber (scrubber_module.js) pra
-  // forçar TODOS os compassos numa linha só (rolagem contínua). Sem isso
-  // (undefined/0/null), comportamento 100% igual a antes — zero regressão
-  // no modo paginado, que nunca passa esse campo.
-  const perLine=opts.perLineOverride||(width<620?2:4);
+  const perLine=width<620?2:4;
   const lines=Math.ceil(nMeasures/perLine);
   const titleH=opts.title?64:14;
   /* com 2+ vozes simultâneas na mesma pauta, hastes sobem E descem ao mesmo
@@ -46,10 +42,6 @@ function renderScore(VF, doc, container, trilhas, opts){
   const tracksStaveNotes=trilhas.map(()=>[]); // paralelo a trilhas[t].events (null p/ nada)
   const allTuplets=[], allBeams=[], measureStaves=[];
   const evIdx=trilhas.map(()=>0);
-  /* Segno/D.S./Fine/Coda: alguma peça tem CODA sem estarmos ainda no compasso
-     do D.S. — pra decidir o texto certo ("D.S." vs "D.S. al Fine" vs "D.S. al
-     Coda") olhamos a peça inteira uma vez, não só o compasso atual. */
-  const pecaTemCoda = !!(opts.measures && opts.measures.some(m=>m.coda));
 
   for(let mi=0;mi<nMeasures;mi++){
     const line=Math.floor(mi/perLine), col=mi%perLine;
@@ -77,23 +69,6 @@ function renderScore(VF, doc, container, trilhas, opts){
     }
     stave.setContext(ctx).draw();
     measureStaves.push(stave);
-
-    // ---- Segno / D.S. / Fine / Coda: texto acima do compasso, mesmo padrão dos
-    // rótulos de casa — sem depender de glifo SMuFL, texto simples já comunica.
-    if(ms.segno||ms.dalSegno||ms.fine||ms.toCoda||ms.coda){
-      const labels=[];
-      if(ms.segno)    labels.push("Segno");
-      if(ms.dalSegno) labels.push(ms.fine?"D.S. al Fine":pecaTemCoda?"D.S. al Coda":"D.S.");
-      if(ms.fine)     labels.push("Fine");
-      if(ms.toCoda)   labels.push("⊕ To Coda");
-      if(ms.coda)     labels.push("⊕ Coda");
-      const lx=stave.getX()+4, ly0=stave.getY()-6;
-      labels.forEach((txt,li)=>{
-        const t=mk("text",{x:lx,y:ly0-li*12,"font-size":11,"font-weight":700,
-          fill:"#333",style:"font-family:'IBM Plex Mono',monospace"});
-        t.textContent=txt;svg.appendChild(t);
-      });
-    }
 
     // eventos do compasso, por trilha (1 cursor local por trilha)
     const mEventsPorTrilha=trilhas.map((tr,t)=>{

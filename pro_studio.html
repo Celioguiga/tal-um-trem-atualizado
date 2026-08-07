@@ -273,23 +273,38 @@ function degreeToPitch(deg,up,down,key){
 function parseCromus(src,tsNum,tsDen){
   const compound=tsDen===8&&tsNum%3===0;
   const warns=[];let txt=src;
-  txt=txt.replace(/[\u2019\u2018`\u00B4]/g,"'");
+  txt=txt.replace(/[’‘`´]/g,"'");
   /* tokens ESTRUTURAIS consumidos ANTES de parsear notas — viram sentinelas @X@ que
-     sobrevivem ao split por "|" (senão ':' e palavras quebram o array -> hastes órfãs). */
+     sobrevivem ao split por "|" (senão ':' e palavras quebram o array -> hastes órfãs).
+     Segno/D.S./Fine/Coda: mesmo padrão de FIM — escrever no FIM do conteúdo do compasso
+     que os carrega (ex.: "5,6,7,1 SEGNO|"), nunca sozinho num compasso vazio, porque a
+     sentinela sempre marca o `lastM` (o compasso que acabou de ser fechado). Ordem de
+     replace importa: @TOCODA@ tem que rodar ANTES de @CODA@ (senão "to coda" perde o
+     "to" e vira só "coda" solto). */
   txt=txt.replace(/\|\|:/g," @RB@ ")               // ||:  repeat-begin
          .replace(/:\|\|/g," @RE@ ")               // :||  repeat-end
          .replace(/\(\s*casa\s*1\s*\)/gi," @V1@ ") // (casa 1) volta BEGIN
          .replace(/\(\s*casa\s*2\s*\)/gi," @V2@ ") // (casa 2) volta END
          .replace(/\bfim\b/gi," @END@ ")           // fim -> barra final |.
+         .replace(/\bsegno\b/gi," @SEGNO@ ")       // SEGNO -> marca o sinal 𝄋
+         .replace(/\b(?:d\.\s*s\.|ds)(?!\w)/gi," @DS@ ") // D.S. / DS -> marca o salto de volta
+         .replace(/\bto\s*coda\b/gi," @TOCODA@ ")  // TO CODA -> marca o desvio (antes de @CODA@!)
+         .replace(/\bfine\b/gi," @FINE@ ")         // FINE -> marca onde parar após o D.S.
+         .replace(/\bcoda\b/gi," @CODA@ ")         // CODA -> marca o início da seção coda
          .replace(/\|\|/g,"|");                    // barra dupla restante = separador simples
   const measures=[];let lastM=null,pendRB=false,curVolta=0;
   txt.split("|").forEach(chunk=>{
-    chunk.split(/(@RB@|@RE@|@V1@|@V2@|@END@)/).forEach(part=>{
+    chunk.split(/(@RB@|@RE@|@V1@|@V2@|@END@|@SEGNO@|@DS@|@TOCODA@|@FINE@|@CODA@)/).forEach(part=>{
       if(part==="@RB@"){pendRB=true;curVolta=0;}
       else if(part==="@V1@")curVolta=1;
       else if(part==="@V2@")curVolta=2;
       else if(part==="@RE@"){if(lastM)lastM.repeatEnd=true;curVolta=0;}
       else if(part==="@END@"){if(lastM)lastM.endBar=true;curVolta=0;}
+      else if(part==="@SEGNO@"){if(lastM)lastM.segno=true;}
+      else if(part==="@DS@"){if(lastM)lastM.dalSegno=true;}
+      else if(part==="@TOCODA@"){if(lastM)lastM.toCoda=true;}
+      else if(part==="@FINE@"){if(lastM)lastM.fine=true;}
+      else if(part==="@CODA@"){if(lastM)lastM.coda=true;}
       else{
         const content=part.trim();if(!content)return;
         const beats=[];
@@ -299,6 +314,15 @@ function parseCromus(src,tsNum,tsDen){
       }
     });
   });
+  /* validação de Segno/D.S./Fine/Coda — avisa, não bloqueia (mesmo espírito dos
+     outros avisos do parser: o usuário decide se ignora). */
+  { const hasSegno=measures.some(m=>m.segno), hasDS=measures.some(m=>m.dalSegno),
+      hasFine=measures.some(m=>m.fine), hasToCoda=measures.some(m=>m.toCoda), hasCoda=measures.some(m=>m.coda);
+    if(hasDS&&!hasSegno) warns.push("D.S. sem SEGNO correspondente — o salto não tem para onde voltar.");
+    if(hasSegno&&!hasDS) warns.push("SEGNO sem D.S. correspondente — o sinal não será usado no playback.");
+    if(hasToCoda!==hasCoda) warns.push("TO CODA e CODA precisam vir em par — só um dos dois foi encontrado.");
+    if(hasFine&&(hasToCoda||hasCoda)) warns.push("FINE e CODA juntos não são suportados nesta versão — escolha D.S. al Fine OU D.S. al Coda, não os dois na mesma cantiga.");
+  }
   return {measures,warns};
 }
 function parseBeat(s,mN,bN,warns,compound){
@@ -443,9 +467,21 @@ function buildScore(parsed,tsNum,tsDen,key,warns){
 /* ---------- Desdobramento de repetições (ordem EXECUTADA, p/ playback) ----------
    Percorre os compassos seguindo ||: :|| e casas: corpo do repeat 2x, casa 1 na
    1ª passada, casa 2 na 2ª. Retorna a lista de ÍNDICES de compasso na ordem tocada.
-   Nível único (Cromus não aninha repetições); trava anti-loop por segurança. */
+   Nível único (Cromus não aninha repetições); trava anti-loop por segurança.
+
+   Segno/D.S./Fine/Coda (novo): tratados como um salto ADICIONAL, independente do
+   ||: :||, resolvido depois de empurrar o compasso na ordem (mesmo lugar onde
+   repeatEnd decide voltar pro ||:). D.S. dispara NO MÁXIMO 1 vez (doneDS). Depois
+   do D.S. (passDS=true): se o compasso é TO CODA e existe CODA na peça, pula pra
+   lá (1 vez, doneToCoda); se o compasso é FINE, encerra a execução ali. Sem
+   TO CODA/CODA nem FINE presentes, o D.S. simplesmente segue tocando até o fim
+   normal da peça — mesmo comportamento de um D.S. "solto". */
 function unfoldRepeats(measures){
   const order=[];let i=0,repeatStart=0,pass=1,guard=0;const doneEnds=new Set();
+  const segnoIdx  = measures.findIndex(m=>m.segno);
+  const toCodaIdx = measures.findIndex(m=>m.toCoda);
+  const codaIdx   = measures.findIndex(m=>m.coda);
+  let doneDS=false, passDS=false, doneToCoda=false;
   while(i<measures.length){
     if(++guard>100000)break;                 // trava: nunca laçar infinito
     const m=measures[i];
@@ -454,6 +490,11 @@ function unfoldRepeats(measures){
       const v=m.volta;while(i<measures.length&&measures[i].volta===v)i++;continue;}
     order.push(i);
     if(m.repeatEnd&&!doneEnds.has(i)){doneEnds.add(i);pass=2;i=repeatStart;continue;} // :|| → salta 1x p/ o ||:
+    if(passDS&&m.fine)break;                                    // D.S. al Fine: encerra aqui
+    if(passDS&&!doneToCoda&&i===toCodaIdx&&codaIdx>=0){          // D.S. al Coda: pula pro trecho da coda
+      doneToCoda=true;i=codaIdx;continue;}
+    if(!doneDS&&m.dalSegno&&segnoIdx>=0){                        // D.S.: salta de volta pro Segno (1x só)
+      doneDS=true;passDS=true;i=segnoIdx;continue;}
     i++;
   }
   return order;
@@ -466,7 +507,11 @@ function unfoldRepeats(measures){
    abre uma trilha nova; tudo até a próxima marca ou o fim do texto pertence a ela. Numeração
    de violonista (1=corda mais aguda...6=mais grave) — CORDAS/CORDAS_MIDI em
    rng_tab_module.js são indexados 6ª→1ª, daí a inversão. */
-function cordaLabelToIndex(n){ return 6-n; }
+/* N_CORDAS vem de rng_tab_module.js (carregado depois, mas isso só importa
+   em tempo de EXECUÇÃO — por quando essa função roda, os dois módulos já
+   terminaram de carregar). Guard cobre o caso de core.js rodando sozinho
+   (ex.: testes via require) sem rng_tab_module.js no mesmo escopo. */
+function cordaLabelToIndex(n){ return (typeof N_CORDAS!=="undefined"?N_CORDAS:6)-n; }
 function parseVozes(fullSrc,tsNum,tsDen,key){
   const partes=fullSrc.split(/^@corda([1-6]):[ \t]*/m);
   const fatal=[];
@@ -508,11 +553,46 @@ if(typeof module!=="undefined")module.exports={RNG_MAPPER,LETTERS,SEMI,KEYS,keyI
    e LETTERS que já existem ali — NÃO redefine cor/forma, R3 respeitada).
 ===================================================================== */
 
-/* ---------- violão: afinação padrão, cordas 6ª→1ª, em pitch class ---------- */
-const CORDAS = [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.E ?? 4];
-/* mesma afinação, em MIDI absoluto (E2 A2 D3 G3 B3 E4) — usada pra bater a oitava exata */
-const CORDAS_MIDI = [40, 45, 50, 55, 59, 64];
-const NCASAS = 12;
+/* ---------- instrumentos suportados: afinação, nº de cordas, transposição ----------
+   Violão é transpositor (grafado 1 oitava ACIMA do que soa — convenção padrão
+   de partitura pra violão). Ukulelê, pela convenção mais comum, soa NA
+   oitava escrita (sem transposição) — se a prática de vocês for outra, é só
+   ajustar `transposicao` abaixo.
+   cordas/cordasMidi vêm na ordem GRAVE→AGUDA da POSIÇÃO no braço (como já
+   era em CORDAS/CORDAS_MIDI) — violão 6ª→1ª; ukulelê reentrante 4ª→1ª (a
+   "4ª corda" nessa lista é a Sol, mesmo soando mais aguda que a 3ª/Dó — é
+   assim que a afinação reentrante funciona; só a ordem física no braço
+   importa aqui, não a altura relativa). */
+const INSTRUMENTOS = {
+  violao: {
+    nome: 'Violão', nCordas: 6,
+    cordas:     [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.E ?? 4],
+    cordasMidi: [40, 45, 50, 55, 59, 64],           // E2 A2 D3 G3 B3 E4
+    nomes:      ['Mi','Lá','Ré','Sol','Si','Mi'],
+    nCasas: 12, transposicao: -12,
+  },
+  ukulele: {
+    nome: 'Ukulelê', nCordas: 4,
+    cordas:     [SEMI.G ?? 7, SEMI.C ?? 0, SEMI.E ?? 4, SEMI.A ?? 9],
+    cordasMidi: [67, 60, 64, 69],                   // G4 C4 E4 A4 (afinação padrão reentrante)
+    nomes:      ['Sol','Dó','Mi','Lá'],
+    nCasas: 12, transposicao: 0,
+  },
+};
+let INSTRUMENTO_ATUAL = 'violao';
+let CORDAS       = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordas;
+let CORDAS_MIDI  = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordasMidi;
+let N_CORDAS     = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCordas;
+let NCASAS       = INSTRUMENTOS[INSTRUMENTO_ATUAL].nCasas;
+let TRANSPOSICAO = INSTRUMENTOS[INSTRUMENTO_ATUAL].transposicao;
+/* troca o instrumento ativo — chamar ANTES de desenhaTabInline (app.js faz
+   isso no topo de render()). Chave desconhecida cai em violão. */
+function setInstrumento(key){
+  const cfg = INSTRUMENTOS[key] || INSTRUMENTOS.violao;
+  INSTRUMENTO_ATUAL = INSTRUMENTOS[key] ? key : 'violao';
+  CORDAS = cfg.cordas; CORDAS_MIDI = cfg.cordasMidi; N_CORDAS = cfg.nCordas;
+  NCASAS = cfg.nCasas; TRANSPOSICAO = cfg.transposicao;
+}
 const midiDoCorda = (corda,casa) => CORDAS_MIDI[corda] + casa;
 
 /* pitch class de um evento da pauta (e.letter + e.acc, já vêm do buildScore) */
@@ -522,7 +602,7 @@ function pcDoEvento(e){ return ((SEMI[e.letter] ?? 0) + (e.acc||0) + 12) % 12; }
 function posicoesPossiveis(pc, maxCasa){
   maxCasa = maxCasa ?? NCASAS;
   const opcoes = [];
-  for(let c=0;c<6;c++) for(let f=0; f<=maxCasa; f++)
+  for(let c=0;c<N_CORDAS;c++) for(let f=0; f<=maxCasa; f++)
     if((CORDAS[c]+f)%12 === pc) opcoes.push({corda:c, casa:f});
   return opcoes;
 }
@@ -532,9 +612,11 @@ function posicoesPossiveis(pc, maxCasa){
    inteiro; se ainda assim nenhuma bater, cai pro pc mais próximo (oitava
    possivelmente errada) e marca fora=true. */
 function escolherPosicao(pc, alvoMidi, opcoesPreferidas, atual){
-  /* violão é transpositor: soa 1 oitava abaixo do escrito na pauta — a busca de
-     posição mira no MIDI real do braço, não no MIDI escrito (e.midi) */
-  const alvoReal = alvoMidi - 12;
+  /* alguns instrumentos são transpositores (violão soa 1 oitava abaixo do
+     escrito na pauta) — a busca de posição mira no MIDI real do braço, não
+     no MIDI escrito (e.midi). TRANSPOSICAO vem do instrumento ativo (0 pra
+     quem não transpõe, ex. ukulelê). */
+  const alvoReal = alvoMidi + TRANSPOSICAO;
   let pool = opcoesPreferidas.filter(o=>midiDoCorda(o.corda,o.casa)===alvoReal);
   let fora = false;
   if(!pool.length){
@@ -552,7 +634,7 @@ function escolherPosicao(pc, alvoMidi, opcoesPreferidas, atual){
 }
 /* modo "mais próxima": MIDI exato manda; deslocamento de casa/corda só desempata */
 function posicionaMelodia(pcs, midis, casaInicial){
-  let atual = {corda: 2, casa: casaInicial ?? 0};
+  let atual = {corda: Math.floor(N_CORDAS/2), casa: casaInicial ?? 0};
   return pcs.map((pc,k)=>{
     const p = escolherPosicao(pc, midis[k], posicoesPossiveis(pc), atual);
     atual = p;
@@ -665,9 +747,10 @@ function nivelFlags(code){ return {8:1,16:2,32:3,64:4}[code] || 0; }
 /* deslocamento horizontal do encaixe da haste na nota: pra cima encaixa pela
    direita, pra baixo pela esquerda — convenção padrão de partitura */
 const STEM_DX = 4;
-/* direção pela corda: as 3 cordas agudas (Sol/Si/Mi aguda, índices 3-5) pra
-   cima; as 3 graves (Mi grave/Lá/Ré, índices 0-2) pra baixo. -1=cima, 1=baixo */
-function direcaoHaste(corda){ return corda>=3 ? -1 : 1; }
+/* direção pela corda: metade aguda (índices altos) pra cima, metade grave
+   (índices baixos) pra baixo — generalizado pro nº de cordas do instrumento
+   ativo (violão: 3/3; ukulelê: 2/2). -1=cima, 1=baixo */
+function direcaoHaste(corda){ return corda>=N_CORDAS/2 ? -1 : 1; }
 /* haste — direção inferida do sinal de (yTopo-yBase): sobe (yTopo<yBase) ou
    desce (yTopo>yBase). nFlags>0 empilha colchetes perto da ponta, voltando
    em direção à nota — usada tanto pra nota solta quanto dentro de um beam
@@ -754,6 +837,10 @@ function desenhaBeam(x1, x2, yBeam, nivel, cor, dir){
    tonicaPc — pitch class da tônica (pra CAGED). Se vier de key.spec,
               calcule com: (SEMI[key.tonicLetter] + sinal) % 12
    opts     — { modo:'proxima'|'caged', shape:'C'|'A'|'G'|'E'|'D', claro:bool }
+
+   ⚠️ LEGADO — mantida só como referência histórica, NÃO é chamada pelo
+   app.js hoje (ele chama desenhaTabInline, mais abaixo). Não editar sem
+   necessidade explícita de usar o modo standalone de novo.
 ===================================================================== */
 function desenhaTab(destino, events, tonicaPc, opts){
   opts = opts || {};
@@ -845,6 +932,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
   const armadura = opts.armadura || '';
   const texto='#666', linhaCor='#999', barraCor='#333';
   const warns = [];
+  const pecaTemCoda = measures.some(m=>m.coda);
 
   /* prepara, por trilha: idxNotas/idxPausas/posições/posPorIdx/tabHalos/suprimidos/
      gruposRitmo — mesmo cálculo que já existia, só rodado 1x por trilha. Trilha
@@ -947,12 +1035,12 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
   });
 
   const ALT=15, PAD=22, STEM_H=22;
-  const nomesCordas=['Mi','Lá','Ré','Sol','Si','Mi'];
+  const nomesCordas = INSTRUMENTOS[INSTRUMENTO_ATUAL].nomes;
   const nLines = Math.ceil(measureBoxes.length/perLine);
 
   for(let line=0; line<nLines; line++){
     const lineTop = topY + line*rowH;
-    const linhaY = corda => lineTop + PAD + (5-corda)*ALT;
+    const linhaY = corda => lineTop + PAD + (N_CORDAS-1-corda)*ALT;
 
     const mStart = line*perLine, mEnd = Math.min(mStart+perLine, measureBoxes.length)-1;
     const xIni = measureBoxes[mStart].x - 32;
@@ -969,14 +1057,14 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
       if(modo==='caged') frag += `<text x="${xFim-120}" y="${lineTop-4}" font-size="11" fill="${texto}" font-family="IBM Plex Mono, monospace" font-weight="600">Desenho ${CAGED_SHAPES[shape].nome}</text>`;
     }
 
-    for(let c=0;c<6;c++){
+    for(let c=0;c<N_CORDAS;c++){
       const y=linhaY(c);
       frag += `<line x1="${xIni}" y1="${y}" x2="${xFim}" y2="${y}" stroke="${linhaCor}" stroke-width="${1.4-c*0.12}"/>`;
       frag += `<text x="${xIni-24}" y="${y+4}" font-size="10" fill="${texto}" font-family="IBM Plex Mono, monospace" font-weight="600">${nomesCordas[c]}</text>`;
     }
     for(let mi=mStart; mi<=mEnd; mi++){
       const box=measureBoxes[mi];
-      const y1=linhaY(5)-7, y2=linhaY(0)+7;
+      const y1=linhaY(N_CORDAS-1)-7, y2=linhaY(0)+7;
       const prevM = mi>mStart ? measures[mi-1] : null;
       if(prevM && prevM.repeatEnd){
         frag += glifoRepeticao(box.x,'end',y1,y2,barraCor);
@@ -988,7 +1076,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         frag += `<line x1="${box.x}" y1="${y1}" x2="${box.x}" y2="${y2}" stroke="${barraCor}" stroke-width="1.2"/>`;
       }
     }
-    { const mEndM=measures[mEnd], yF1=linhaY(5)-7, yF2=linhaY(0)+7;
+    { const mEndM=measures[mEnd], yF1=linhaY(N_CORDAS-1)-7, yF2=linhaY(0)+7;
       if(mEndM.repeatEnd){
         frag += glifoRepeticao(xFim,'end',yF1,yF2,barraCor);
       }else if(mEndM.endBar || mEnd===measures.length-1){
@@ -1001,7 +1089,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
     { let segIni=null, segVolta=0;
       const fecharSegmento=(fimMi)=>{
         const x1=measureBoxes[segIni].x, x2=measureBoxes[fimMi].x+measureBoxes[fimMi].width;
-        const y=linhaY(5)-12;
+        const y=linhaY(N_CORDAS-1)-12;
         const hookIni=voltaInfo[segIni].first, hookFim=voltaInfo[fimMi].last;
         frag += traceVolta(x1,x2,y,hookIni,hookFim,hookIni?segVolta+'.':'',barraCor,texto);
       };
@@ -1014,6 +1102,23 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         }
       }
       if(segVolta) fecharSegmento(mEnd);
+    }
+
+    // ---- Segno / D.S. / Fine / Coda: texto acima do compasso, mesmo padrão dos
+    // rótulos de casa (traceVolta) — sem depender de glifo SMuFL.
+    for(let mi=mStart; mi<=mEnd; mi++){
+      const ms=measures[mi];
+      if(!(ms.segno||ms.dalSegno||ms.fine||ms.toCoda||ms.coda)) continue;
+      const box=measureBoxes[mi];
+      const labels=[];
+      if(ms.segno)    labels.push('Segno');
+      if(ms.dalSegno) labels.push(ms.fine?'D.S. al Fine':pecaTemCoda?'D.S. al Coda':'D.S.');
+      if(ms.fine)     labels.push('Fine');
+      if(ms.toCoda)   labels.push('⊕ To Coda');
+      if(ms.coda)     labels.push('⊕ Coda');
+      labels.forEach((txt,li)=>{
+        frag += `<text x="${box.x+2}" y="${lineTop-8-li*11}" font-size="10" font-weight="700" fill="${barraCor}" font-family="IBM Plex Mono, monospace">${txt}</text>`;
+      });
     }
 
     const g=mk('g',{class:'real-tab-line'});
@@ -1099,7 +1204,7 @@ function desenhaTabInline(svg, mk, trilhas, tracksAnchors, tracksRestAnchors, me
         if(Math.floor(e.measure/perLine)!==line) return;
         const x = restAnchors[idx];
         if(x==null) return;
-        const yCentro = linhaY(2.5);
+        const yCentro = linhaY((N_CORDAS-1)/2);
         g.insertAdjacentHTML('beforeend', glifoPausaVexFlow(e.code,x,yCentro,barraCor));
       });
     });
@@ -1120,7 +1225,11 @@ function renderScore(VF, doc, container, trilhas, opts){
   const NSVG="http://www.w3.org/2000/svg";
   const mk=(t,a)=>{const e=doc.createElementNS(NSVG,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
 
-  const perLine=width<620?2:4;
+  // opts.perLineOverride: usado pelo modo scrubber (scrubber_module.js) pra
+  // forçar TODOS os compassos numa linha só (rolagem contínua). Sem isso
+  // (undefined/0/null), comportamento 100% igual a antes — zero regressão
+  // no modo paginado, que nunca passa esse campo.
+  const perLine=opts.perLineOverride||(width<620?2:4);
   const lines=Math.ceil(nMeasures/perLine);
   const titleH=opts.title?64:14;
   /* com 2+ vozes simultâneas na mesma pauta, hastes sobem E descem ao mesmo
@@ -1152,6 +1261,10 @@ function renderScore(VF, doc, container, trilhas, opts){
   const tracksStaveNotes=trilhas.map(()=>[]); // paralelo a trilhas[t].events (null p/ nada)
   const allTuplets=[], allBeams=[], measureStaves=[];
   const evIdx=trilhas.map(()=>0);
+  /* Segno/D.S./Fine/Coda: alguma peça tem CODA sem estarmos ainda no compasso
+     do D.S. — pra decidir o texto certo ("D.S." vs "D.S. al Fine" vs "D.S. al
+     Coda") olhamos a peça inteira uma vez, não só o compasso atual. */
+  const pecaTemCoda = !!(opts.measures && opts.measures.some(m=>m.coda));
 
   for(let mi=0;mi<nMeasures;mi++){
     const line=Math.floor(mi/perLine), col=mi%perLine;
@@ -1179,6 +1292,23 @@ function renderScore(VF, doc, container, trilhas, opts){
     }
     stave.setContext(ctx).draw();
     measureStaves.push(stave);
+
+    // ---- Segno / D.S. / Fine / Coda: texto acima do compasso, mesmo padrão dos
+    // rótulos de casa — sem depender de glifo SMuFL, texto simples já comunica.
+    if(ms.segno||ms.dalSegno||ms.fine||ms.toCoda||ms.coda){
+      const labels=[];
+      if(ms.segno)    labels.push("Segno");
+      if(ms.dalSegno) labels.push(ms.fine?"D.S. al Fine":pecaTemCoda?"D.S. al Coda":"D.S.");
+      if(ms.fine)     labels.push("Fine");
+      if(ms.toCoda)   labels.push("⊕ To Coda");
+      if(ms.coda)     labels.push("⊕ Coda");
+      const lx=stave.getX()+4, ly0=stave.getY()-6;
+      labels.forEach((txt,li)=>{
+        const t=mk("text",{x:lx,y:ly0-li*12,"font-size":11,"font-weight":700,
+          fill:"#333",style:"font-family:'IBM Plex Mono',monospace"});
+        t.textContent=txt;svg.appendChild(t);
+      });
+    }
 
     // eventos do compasso, por trilha (1 cursor local por trilha)
     const mEventsPorTrilha=trilhas.map((tr,t)=>{
@@ -1339,6 +1469,139 @@ function shapeSvg(mk,deg,cor,cx,cy,s,vazado){
 
 if(typeof module!=="undefined")module.exports={renderScore,shapeSvg};
 
+/* =====================================================================
+   SCRUBBER_MODULE — modo de rolagem contínua (estilo Synthesia).
+   Cola no build.py junto dos outros módulos (depois de core.js/
+   rng_tab_module.js/renderer.js — usa renderScore, desenhaTabInline e
+   RNG_MAPPER que já existem ali).
+
+   Reaproveita renderScore()/desenhaTabInline() como já estão — não altera
+   nenhum dos dois (só um campo novo e opcional em renderScore.js,
+   perLineOverride, que não muda nada quando ausente). Modo paginado
+   continua 100% como está.
+
+   IDEIA: em vez de desenhar os compassos como ESCRITOS (com símbolo de
+   repetição/D.S.), desenrola a peça pra ordem REAL de playback
+   (unfoldRepeats) — uma seção repetida vira 2 cópias de compassos lado a
+   lado, numa linha só, bem larga. O container rola sozinho durante o play,
+   sempre mantendo a nota atual visível.
+===================================================================== */
+
+/* clona 1 trilha, remapeando measure/events pra ordem de playback.
+   ordem = array de índices de compasso ORIGINAL, na sequência tocada
+   (saída de unfoldRepeats). Repetição/casa/D.S. perdem sentido já
+   desenrolados — removidos (repeatBegin/repeatEnd/volta); Segno/D.S./
+   Fine/To Coda/Coda continuam como rótulo informativo onde caírem. */
+function desenrolarTrilha(tr, ordem){
+  const porCompasso = {};
+  tr.events.forEach(e=>{ (porCompasso[e.measure]=porCompasso[e.measure]||[]).push(e); });
+  const eventsNovos = [];
+  const measuresNovos = ordem.map((origMi, novoMi)=>{
+    const origM = tr.measures[origMi] || {beats:[]};
+    (porCompasso[origMi]||[]).forEach(e=>{
+      eventsNovos.push(Object.assign({}, e, {measure:novoMi}));
+    });
+    return {
+      beats: origM.beats,
+      repeatBegin:false, repeatEnd:false, volta:0,
+      endBar: novoMi===ordem.length-1,
+      segno: !!origM.segno, dalSegno: !!origM.dalSegno,
+      fine: !!origM.fine, toCoda: !!origM.toCoda, coda: !!origM.coda,
+    };
+  });
+  return { corda: tr.corda, measures: measuresNovos, events: eventsNovos, warns: [] };
+}
+
+/* largura por compasso na linha única — arbitrário, dá espaço suficiente
+   pra 4 semicolcheias com haste sem espremer. Ajustável se ficar apertado
+   com peças de ritmo muito denso. */
+const SCRUB_MEASURE_W = 170;
+
+/* monta o SVG do modo scrubber dentro de `container`. Espelha o que
+   render() já faz no modo paginado, só que com a sequência desenrolada
+   numa linha só e width calculado pra caber tudo (gera scroll horizontal).
+
+   trilhas    — lastTracks (formato de sempre, ordem ESCRITA)
+   ordem      — lastPlayOrder (saída de unfoldRepeats sobre a trilha principal)
+   opts       — { title, subtitle, tsNum, tsDen, ts, key, mode, tonicaPc,
+                  compasso, armadura, tabOpts }
+   Retorna: { out, trilhasDesenroladas, tracksTabHalos, tabWarns }
+   (out = mesmo retorno de renderScore: svg, tracks/anchors, measureBoxes...) */
+function renderScrubber(VF, doc, mk, container, trilhas, ordem, opts){
+  const trilhasDesenroladas = trilhas.map(tr=>desenrolarTrilha(tr, ordem));
+  const nMeasures = ordem.length;
+  const width = Math.max(nMeasures*SCRUB_MEASURE_W, container.clientWidth||760);
+
+  const out = renderScore(VF, doc, container, trilhasDesenroladas, Object.assign({}, opts, {
+    nMeasures,
+    measures: trilhasDesenroladas[0].measures,
+    width,
+    perLineOverride: nMeasures,
+  }));
+
+  let tabWarns=[], tracksTabHalos=trilhasDesenroladas.map(()=>[]);
+  try{
+    const tabResult = desenhaTabInline(
+      out.svg, mk, trilhasDesenroladas,
+      out.tracks.map(t=>t.anchors), out.tracks.map(t=>t.restAnchors),
+      out.measureBoxes, trilhasDesenroladas[0].measures,
+      out.perLine, out.rowH, out.TAB_H, out.top,
+      opts.tonicaPc, Object.assign({compasso:opts.compasso, armadura:opts.armadura}, opts.tabOpts)
+    );
+    tracksTabHalos = tabResult.tracksTabHalos;
+    tabWarns = tabResult.warns;
+  }catch(err){
+    console.error("Real Tablatura (scrubber):", err);
+  }
+
+  return { out, trilhasDesenroladas, tracksTabHalos, tabWarns };
+}
+
+/* schedule específico do modo scrubber: mais simples que o schedule()
+   original (app.js) porque a trilha desenrolada JÁ está na ordem física
+   de execução — não precisa reconstituir via lastPlayOrder/sequenciaExecutada,
+   só percorrer events na ordem em que estão. Mesma lógica de ligadura
+   (~ com mesma nota = funde ataque, não retoca) que o schedule original. */
+function scheduleDesenrolado(trilhasDesenroladas, bpm){
+  const spb = 60/(bpm||80);
+  const out = []; const totais = [];
+  trilhasDesenroladas.forEach((tr,t)=>{
+    const ev = tr.events;
+    let time=0.06; const skip=new Set();
+    for(let k=0;k<ev.length;k++){
+      if(skip.has(k)){ continue; }
+      const e=ev[k];
+      if(!e.rest){
+        let dur=e.beats, j=k;
+        while(ev[j]&&ev[j].tie&&ev[j].sameTie&&j+1<ev.length){
+          dur+=ev[j+1].beats; skip.add(j+1); j++;
+        }
+        out.push({time, midi:e.midi, dur:dur*spb, idx:k, track:t});
+      }
+      time += e.beats*spb;
+    }
+    totais.push(time);
+  });
+  out.sort((a,b)=>a.time-b.time);
+  return {sched:out, total: totais.length?Math.max(...totais):0};
+}
+
+/* rola `container` horizontalmente pra manter `cx` (posição X da nota
+   atual) numa faixa fixa perto da borda esquerda (ANCORA_FRAC da largura
+   visível) — sensação de "a música anda, você fica parado olhando",
+   igual Synthesia/piano-roll. Só rola se precisar (evita jitter de rolar
+   a cada nota quando já está visível na posição certa). */
+const SCRUB_ANCORA_FRAC = 0.18;
+function acompanharScrubber(container, cx, suave){
+  const alvo = Math.max(0, cx - container.clientWidth*SCRUB_ANCORA_FRAC);
+  if(Math.abs(container.scrollLeft-alvo) < 4) return false;
+  container.scrollTo({left:alvo, behavior: suave?'smooth':'auto'});
+  return true;
+}
+
+if(typeof module!=="undefined")
+  module.exports = { desenrolarTrilha, renderScrubber, scheduleDesenrolado, acompanharScrubber, SCRUB_MEASURE_W };
+
 </script>
 <script>
 /* Amostras reais de violão (nylon), extraídas do MS Basic.sf3 (MIT) — ver
@@ -1385,6 +1648,10 @@ const GUITAR_SAMPLES_NYLON = {
 const VF=Vex.Flow;
 let lastTracks=[],lastPlayOrder=[],halos=[],tabHalos=[],synth=null;
 let layoutAtual=null,autoScrollAtivo=true,scrollProgramatico=false,scrollProgramaticoT=null;
+/* modo scrubber (rolagem contínua) — ver scrubber_module.js. Estado
+   próprio, separado do modo paginado (halos/layoutAtual acima), pra não
+   arriscar regressão no que já funciona. */
+let modoScrubber=false, scrubberLayout=null, scrubberHalos=[];
 const $=id=>document.getElementById(id);
 const getMode=()=>document.querySelector('input[name="modo"]:checked').value;
 const KEY_LABEL={C:"Dó maior",G:"Sol maior",D:"Ré maior",A:"Lá maior",E:"Mi maior",F:"Fá maior",
@@ -1398,8 +1665,38 @@ function tonicaPc(key){
 }
 function getTabOpts(){
   const v=$("selModoTab").value;
+  // CAGED é desenho de acorde de violão (6 cordas) — instrumento diferente
+  // de violão sempre usa "mais próxima", mesmo que o <select> ainda esteja
+  // com uma forma CAGED marcada de uma troca de instrumento anterior.
+  if(instrumentoAtual!=='violao') return {modo:'proxima'};
   return v==='proxima' ? {modo:'proxima'} : {modo:'caged', shape:v};
 }
+
+/* ---- Instrumento (Violão/Ukulelê, ver INSTRUMENTOS em rng_tab_module.js) ----
+   Seletor injetado via JS (não depende de mudança no shell.html — evita
+   descompasso entre os dois arquivos). Só afeta a Real Tablatura (afinação/
+   nº de cordas); pauta e áudio continuam iguais por enquanto — ver nota em
+   ensureSynth() sobre amostras. */
+let instrumentoAtual = 'violao';
+function atualizarVisibilidadeCaged(){
+  const sel=$("selModoTab"); if(!sel) return;
+  [...sel.options].forEach(o=>{ if(o.value!=='proxima') o.disabled = instrumentoAtual!=='violao'; });
+  if(instrumentoAtual!=='violao' && sel.value!=='proxima') sel.value='proxima';
+}
+(function(){
+  const tomEl=$("tom");
+  if(!tomEl || document.getElementById("instrumento")) return; // sem #tom no shell, ou já existe -- não injeta 2x
+  const wrap=document.createElement("span");
+  wrap.style.marginLeft="8px";
+  wrap.innerHTML=`<label style="margin-right:4px">Instrumento:</label>
+    <select id="instrumento"><option value="violao">Violão</option><option value="ukulele">Ukulelê</option></select>`;
+  tomEl.insertAdjacentElement("afterend", wrap);
+  document.getElementById("instrumento").addEventListener("change",e=>{
+    instrumentoAtual=e.target.value;
+    atualizarVisibilidadeCaged();
+    render();
+  });
+})();
 
 (function(){const d=$("markDots");
   for(const L of LETTERS){const i=document.createElement("i");i.style.background=RNG_MAPPER.cores[L];d.appendChild(i);}})();
@@ -1422,10 +1719,11 @@ function buildLegend(){
 
 function render(){
   stopPlayback();
+  setInstrumento(instrumentoAtual);
   buildLegend();
   const av=$("avisos");av.innerHTML="";
   const box=$("score");box.innerHTML="";
-  halos=[];tabHalos=[];
+  halos=[];tabHalos=[];scrubberHalos=[];scrubberLayout=null;
 
   const titulo=$("titulo").value.trim()||"Sem Título";
   const ts=$("compasso").value, [tsNum,tsDen]=ts.split("/").map(Number);
@@ -1443,6 +1741,35 @@ function render(){
   if(!lastTracks.some(tr=>tr.events.length)){av.innerHTML='<span class="err">Nada para renderizar — confira a sintaxe.</span>';return;}
 
   const armaduraLabel = KEY_LABEL[$("tom").value] + " · " + (key.sig>0 ? key.sig+'♯' : key.sig<0 ? (-key.sig)+'♭' : 'sem alteração');
+
+  // ---- modo scrubber: caminho totalmente separado do paginado (ver
+  // scrubber_module.js) — não toca em nada do bloco de baixo.
+  if(modoScrubber){
+    box.classList.add('scrubber-ativo');
+    let scrubResult;
+    try{
+      scrubResult = renderScrubber(VF, document, mkEl, box, lastTracks, lastPlayOrder, {
+        tsNum, tsDen, ts, key, mode:getMode(),
+        title:titulo, subtitle:`${ts} · ♩=${bpm} · ${KEY_LABEL[$("tom").value]} · Synemusic`,
+        tonicaPc: tonicaPc(key), compasso: ts, armadura: armaduraLabel, tabOpts: getTabOpts(),
+      });
+    }catch(err){
+      av.innerHTML='<span class="err">Erro na gravura (scrubber): '+err.message+"</span>";return;
+    }
+    scrubberLayout = scrubResult;
+    scrubberHalos = scrubResult.out.tracks.map(trackOut=>
+      trackOut.anchors.map(a=>{
+        if(!a) return null;
+        const h=mkEl("circle",{cx:a.cx,cy:a.cy,r:11,fill:a.cor,opacity:0,"pointer-events":"none"});
+        scrubResult.out.svg.insertBefore(h, scrubResult.out.svg.firstChild);
+        return h;
+      })
+    );
+    const ws=(scrubResult.tabWarns||[]);
+    if(ws.length) av.innerHTML=ws.map(w=>"⚠ "+w).join("<br>");
+    return;
+  }
+  box.classList.remove('scrubber-ativo');
 
   const width=Math.max(box.clientWidth||760,560);
   let out;
@@ -1488,6 +1815,13 @@ function render(){
 function pintarHalo(t,idx,op){
   const h=halos[t]&&halos[t][idx];if(h)h.setAttribute("opacity",op);
   const th=tabHalos[t]&&tabHalos[t][idx];if(th)th.setAttribute("opacity",op);
+}
+/* mesma ideia de pintarHalo, mas pros arrays próprios do modo scrubber
+   (halos/tabHalos indexados pela sequência DESENROLADA, não pela original —
+   uma nota de repetição tem 2 posições/halos diferentes na tela). */
+function pintarHaloScrubber(t,idx,op){
+  const h=scrubberHalos[t]&&scrubberHalos[t][idx];if(h)h.setAttribute("opacity",op);
+  const th=scrubberLayout&&scrubberLayout.tracksTabHalos[t]&&scrubberLayout.tracksTabHalos[t][idx];if(th)th.setAttribute("opacity",op);
 }
 /* rola #score pra manter a nota atual visível — só mexe se o alvo já não
    estiver dentro da área visível (modo "página", não segue nota a nota).
@@ -1560,11 +1894,42 @@ function schedule(){
 function stopPlayback(){
   try{Tone.Transport.stop();Tone.Transport.cancel();}catch(_){}
   lastTracks.forEach((tr,t)=>{for(let i=0;i<tr.events.length;i++)pintarHalo(t,i,"0");});
+  if(scrubberLayout){
+    scrubberLayout.trilhasDesenroladas.forEach((tr,t)=>{for(let i=0;i<tr.events.length;i++)pintarHaloScrubber(t,i,"0");});
+  }
 }
 async function play(){
   if(!lastTracks.length||!lastTracks.some(tr=>tr.events.length))return;
   await Tone.start();stopPlayback();await ensureSynth();
   autoScrollAtivo=true;
+
+  // ---- modo scrubber: schedule próprio (scheduleDesenrolado), halos
+  // próprios, rolagem própria (acompanharScrubber) — não usa nada do
+  // caminho paginado abaixo.
+  if(modoScrubber){
+    if(!scrubberLayout) return;
+    const bpm=+$("andamento").value||80;
+    const {sched,total}=scheduleDesenrolado(scrubberLayout.trilhasDesenroladas, bpm);
+    if(!sched.length) return;
+    const box=$("score");
+    sched.forEach(s=>{
+      Tone.Transport.scheduleOnce(time=>{
+        synth.triggerAttackRelease(Tone.Frequency(s.midi,"midi"),s.dur*0.92,time);
+        Tone.Draw.schedule(()=>{
+          pintarHaloScrubber(s.track,s.idx,".26");
+          if(s.track===0){
+            const a=scrubberLayout.out.tracks[0].anchors[s.idx];
+            if(a) acompanharScrubber(box,a.cx,true);
+          }
+        },time);
+        Tone.Draw.schedule(()=>pintarHaloScrubber(s.track,s.idx,"0"),time+s.dur*0.9);
+      },s.time);
+    });
+    Tone.Transport.scheduleOnce(()=>stopPlayback(),total+0.4);
+    Tone.Transport.start();
+    return;
+  }
+
   const {sched,total}=schedule();
   sched.forEach(s=>{
     Tone.Transport.scheduleOnce(time=>{
@@ -1579,7 +1944,7 @@ async function play(){
 
 /* ---------- código da cantiga ---------- */
 function toCode(){
-  return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n\n${$("cromus").value}`;
+  return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n@instrumento: ${instrumentoAtual}\n\n${$("cromus").value}`;
 }
 function fromCode(code){
   /* cabeçalho (@titulo/@compasso/@tom/@andamento) só é reconhecido ANTES da 1ª linha em
@@ -1596,6 +1961,11 @@ function fromCode(code){
       else if(k==="compasso"&&compassosValidos.includes(v))$("compasso").value=v;
       else if(k==="tom"&&KEYS[v]!==undefined)$("tom").value=v;
       else if(k==="andamento")$("andamento").value=parseInt(v)||80;
+      else if(k==="instrumento"&&INSTRUMENTOS[v]){
+        instrumentoAtual=v;
+        const sel=document.getElementById("instrumento");if(sel)sel.value=v;
+        atualizarVisibilidadeCaged();
+      }
     }else body.push(ln);
   }
   const cr=body.join("\n").trim();
@@ -1607,7 +1977,7 @@ function download(name,blob){
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 }
 const slug=()=>($("titulo").value.trim()||"cantiga").toLowerCase().normalize("NFD")
-  .replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
+  .replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
 
 /* ---------- WAV (render offline) ---------- */
 async function exportWav(){
@@ -1684,6 +2054,18 @@ document.getElementById("selModoTab").addEventListener("change", render);
    (scroll não disparado por acompanharScroll), desliga o auto-scroll até
    o próximo play() reativar do zero */
 $("score").addEventListener("scroll",()=>{ if(!scrollProgramatico) autoScrollAtivo=false; });
+
+/* botão de alternância Paginado/Scrubber — ⚠️ precisa existir em shell.html
+   um elemento <button id="btnScrubber">. Se não existir ainda, este listener
+   simplesmente não pega (optional chaining), sem erro — nada quebra, só o
+   modo scrubber fica inacessível até o botão ser adicionado. */
+document.getElementById("btnScrubber")?.addEventListener("click",()=>{
+  modoScrubber=!modoScrubber;
+  const b=document.getElementById("btnScrubber");
+  b.classList.toggle("ativo",modoScrubber);
+  b.textContent = modoScrubber ? "📜 Ver paginado" : "🎬 Ver scrubber";
+  render();
+});
 
 </script>
 </body>

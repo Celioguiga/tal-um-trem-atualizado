@@ -10,11 +10,7 @@ function renderScore(VF, doc, container, trilhas, opts){
   const NSVG="http://www.w3.org/2000/svg";
   const mk=(t,a)=>{const e=doc.createElementNS(NSVG,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
 
-  // opts.perLineOverride: usado pelo modo scrubber (scrubber_module.js) pra
-  // forçar TODOS os compassos numa linha só (rolagem contínua). Sem isso
-  // (undefined/0/null), comportamento 100% igual a antes — zero regressão
-  // no modo paginado, que nunca passa esse campo.
-  const perLine=opts.perLineOverride||(width<620?2:4);
+  const perLine=width<620?2:4;
   const lines=Math.ceil(nMeasures/perLine);
   const titleH=opts.title?64:14;
   /* com 2+ vozes simultâneas na mesma pauta, hastes sobem E descem ao mesmo
@@ -82,7 +78,7 @@ function renderScore(VF, doc, container, trilhas, opts){
     // rótulos de casa — sem depender de glifo SMuFL, texto simples já comunica.
     if(ms.segno||ms.dalSegno||ms.fine||ms.toCoda||ms.coda){
       const labels=[];
-      if(ms.segno)    labels.push("Segno");
+      if(ms.segno)    labels.push("𝄋 Segno");
       if(ms.dalSegno) labels.push(ms.fine?"D.S. al Fine":pecaTemCoda?"D.S. al Coda":"D.S.");
       if(ms.fine)     labels.push("Fine");
       if(ms.toCoda)   labels.push("⊕ To Coda");

@@ -19,38 +19,8 @@ function tonicaPc(key){
 }
 function getTabOpts(){
   const v=$("selModoTab").value;
-  // CAGED é desenho de acorde de violão (6 cordas) — instrumento diferente
-  // de violão sempre usa "mais próxima", mesmo que o <select> ainda esteja
-  // com uma forma CAGED marcada de uma troca de instrumento anterior.
-  if(instrumentoAtual!=='violao') return {modo:'proxima'};
   return v==='proxima' ? {modo:'proxima'} : {modo:'caged', shape:v};
 }
-
-/* ---- Instrumento (Violão/Ukulelê, ver INSTRUMENTOS em rng_tab_module.js) ----
-   Seletor injetado via JS (não depende de mudança no shell.html — evita
-   descompasso entre os dois arquivos). Só afeta a Real Tablatura (afinação/
-   nº de cordas); pauta e áudio continuam iguais por enquanto — ver nota em
-   ensureSynth() sobre amostras. */
-let instrumentoAtual = 'violao';
-function atualizarVisibilidadeCaged(){
-  const sel=$("selModoTab"); if(!sel) return;
-  [...sel.options].forEach(o=>{ if(o.value!=='proxima') o.disabled = instrumentoAtual!=='violao'; });
-  if(instrumentoAtual!=='violao' && sel.value!=='proxima') sel.value='proxima';
-}
-(function(){
-  const tomEl=$("tom");
-  if(!tomEl || document.getElementById("instrumento")) return; // sem #tom no shell, ou já existe -- não injeta 2x
-  const wrap=document.createElement("span");
-  wrap.style.marginLeft="8px";
-  wrap.innerHTML=`<label style="margin-right:4px">Instrumento:</label>
-    <select id="instrumento"><option value="violao">Violão</option><option value="ukulele">Ukulelê</option></select>`;
-  tomEl.insertAdjacentElement("afterend", wrap);
-  document.getElementById("instrumento").addEventListener("change",e=>{
-    instrumentoAtual=e.target.value;
-    atualizarVisibilidadeCaged();
-    render();
-  });
-})();
 
 (function(){const d=$("markDots");
   for(const L of LETTERS){const i=document.createElement("i");i.style.background=RNG_MAPPER.cores[L];d.appendChild(i);}})();
@@ -73,7 +43,6 @@ function buildLegend(){
 
 function render(){
   stopPlayback();
-  setInstrumento(instrumentoAtual);
   buildLegend();
   const av=$("avisos");av.innerHTML="";
   const box=$("score");box.innerHTML="";
@@ -298,7 +267,7 @@ async function play(){
 
 /* ---------- código da cantiga ---------- */
 function toCode(){
-  return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n@instrumento: ${instrumentoAtual}\n\n${$("cromus").value}`;
+  return `@titulo: ${$("titulo").value}\n@compasso: ${$("compasso").value}\n@tom: ${$("tom").value}\n@andamento: ${$("andamento").value}\n\n${$("cromus").value}`;
 }
 function fromCode(code){
   /* cabeçalho (@titulo/@compasso/@tom/@andamento) só é reconhecido ANTES da 1ª linha em
@@ -315,11 +284,6 @@ function fromCode(code){
       else if(k==="compasso"&&compassosValidos.includes(v))$("compasso").value=v;
       else if(k==="tom"&&KEYS[v]!==undefined)$("tom").value=v;
       else if(k==="andamento")$("andamento").value=parseInt(v)||80;
-      else if(k==="instrumento"&&INSTRUMENTOS[v]){
-        instrumentoAtual=v;
-        const sel=document.getElementById("instrumento");if(sel)sel.value=v;
-        atualizarVisibilidadeCaged();
-      }
     }else body.push(ln);
   }
   const cr=body.join("\n").trim();

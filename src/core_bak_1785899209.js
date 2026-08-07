@@ -261,11 +261,7 @@ function unfoldRepeats(measures){
    abre uma trilha nova; tudo até a próxima marca ou o fim do texto pertence a ela. Numeração
    de violonista (1=corda mais aguda...6=mais grave) — CORDAS/CORDAS_MIDI em
    rng_tab_module.js são indexados 6ª→1ª, daí a inversão. */
-/* N_CORDAS vem de rng_tab_module.js (carregado depois, mas isso só importa
-   em tempo de EXECUÇÃO — por quando essa função roda, os dois módulos já
-   terminaram de carregar). Guard cobre o caso de core.js rodando sozinho
-   (ex.: testes via require) sem rng_tab_module.js no mesmo escopo. */
-function cordaLabelToIndex(n){ return (typeof N_CORDAS!=="undefined"?N_CORDAS:6)-n; }
+function cordaLabelToIndex(n){ return 6-n; }
 function parseVozes(fullSrc,tsNum,tsDen,key){
   const partes=fullSrc.split(/^@corda([1-6]):[ \t]*/m);
   const fatal=[];

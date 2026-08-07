@@ -22,7 +22,6 @@ bloco=f"""<script>
 {r("src/core.js")}
 {r("src/rng_tab_module.js")}
 {r("src/renderer.js")}
-{r("src/scrubber_module.js")}
 </script>
 <script>
 /* Amostras reais de violão (nylon), extraídas do MS Basic.sf3 (MIT) — ver

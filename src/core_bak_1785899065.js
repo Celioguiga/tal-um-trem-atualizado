@@ -27,38 +27,23 @@ function degreeToPitch(deg,up,down,key){
 function parseCromus(src,tsNum,tsDen){
   const compound=tsDen===8&&tsNum%3===0;
   const warns=[];let txt=src;
-  txt=txt.replace(/[’‘`´]/g,"'");
+  txt=txt.replace(/[\u2019\u2018`\u00B4]/g,"'");
   /* tokens ESTRUTURAIS consumidos ANTES de parsear notas — viram sentinelas @X@ que
-     sobrevivem ao split por "|" (senão ':' e palavras quebram o array -> hastes órfãs).
-     Segno/D.S./Fine/Coda: mesmo padrão de FIM — escrever no FIM do conteúdo do compasso
-     que os carrega (ex.: "5,6,7,1 SEGNO|"), nunca sozinho num compasso vazio, porque a
-     sentinela sempre marca o `lastM` (o compasso que acabou de ser fechado). Ordem de
-     replace importa: @TOCODA@ tem que rodar ANTES de @CODA@ (senão "to coda" perde o
-     "to" e vira só "coda" solto). */
+     sobrevivem ao split por "|" (senão ':' e palavras quebram o array -> hastes órfãs). */
   txt=txt.replace(/\|\|:/g," @RB@ ")               // ||:  repeat-begin
          .replace(/:\|\|/g," @RE@ ")               // :||  repeat-end
          .replace(/\(\s*casa\s*1\s*\)/gi," @V1@ ") // (casa 1) volta BEGIN
          .replace(/\(\s*casa\s*2\s*\)/gi," @V2@ ") // (casa 2) volta END
          .replace(/\bfim\b/gi," @END@ ")           // fim -> barra final |.
-         .replace(/\bsegno\b/gi," @SEGNO@ ")       // SEGNO -> marca o sinal 𝄋
-         .replace(/\b(?:d\.\s*s\.|ds)(?!\w)/gi," @DS@ ") // D.S. / DS -> marca o salto de volta
-         .replace(/\bto\s*coda\b/gi," @TOCODA@ ")  // TO CODA -> marca o desvio (antes de @CODA@!)
-         .replace(/\bfine\b/gi," @FINE@ ")         // FINE -> marca onde parar após o D.S.
-         .replace(/\bcoda\b/gi," @CODA@ ")         // CODA -> marca o início da seção coda
          .replace(/\|\|/g,"|");                    // barra dupla restante = separador simples
   const measures=[];let lastM=null,pendRB=false,curVolta=0;
   txt.split("|").forEach(chunk=>{
-    chunk.split(/(@RB@|@RE@|@V1@|@V2@|@END@|@SEGNO@|@DS@|@TOCODA@|@FINE@|@CODA@)/).forEach(part=>{
+    chunk.split(/(@RB@|@RE@|@V1@|@V2@|@END@)/).forEach(part=>{
       if(part==="@RB@"){pendRB=true;curVolta=0;}
       else if(part==="@V1@")curVolta=1;
       else if(part==="@V2@")curVolta=2;
       else if(part==="@RE@"){if(lastM)lastM.repeatEnd=true;curVolta=0;}
       else if(part==="@END@"){if(lastM)lastM.endBar=true;curVolta=0;}
-      else if(part==="@SEGNO@"){if(lastM)lastM.segno=true;}
-      else if(part==="@DS@"){if(lastM)lastM.dalSegno=true;}
-      else if(part==="@TOCODA@"){if(lastM)lastM.toCoda=true;}
-      else if(part==="@FINE@"){if(lastM)lastM.fine=true;}
-      else if(part==="@CODA@"){if(lastM)lastM.coda=true;}
       else{
         const content=part.trim();if(!content)return;
         const beats=[];
@@ -68,15 +53,6 @@ function parseCromus(src,tsNum,tsDen){
       }
     });
   });
-  /* validação de Segno/D.S./Fine/Coda — avisa, não bloqueia (mesmo espírito dos
-     outros avisos do parser: o usuário decide se ignora). */
-  { const hasSegno=measures.some(m=>m.segno), hasDS=measures.some(m=>m.dalSegno),
-      hasFine=measures.some(m=>m.fine), hasToCoda=measures.some(m=>m.toCoda), hasCoda=measures.some(m=>m.coda);
-    if(hasDS&&!hasSegno) warns.push("D.S. sem SEGNO correspondente — o salto não tem para onde voltar.");
-    if(hasSegno&&!hasDS) warns.push("SEGNO sem D.S. correspondente — o sinal não será usado no playback.");
-    if(hasToCoda!==hasCoda) warns.push("TO CODA e CODA precisam vir em par — só um dos dois foi encontrado.");
-    if(hasFine&&(hasToCoda||hasCoda)) warns.push("FINE e CODA juntos não são suportados nesta versão — escolha D.S. al Fine OU D.S. al Coda, não os dois na mesma cantiga.");
-  }
   return {measures,warns};
 }
 function parseBeat(s,mN,bN,warns,compound){
@@ -221,21 +197,9 @@ function buildScore(parsed,tsNum,tsDen,key,warns){
 /* ---------- Desdobramento de repetições (ordem EXECUTADA, p/ playback) ----------
    Percorre os compassos seguindo ||: :|| e casas: corpo do repeat 2x, casa 1 na
    1ª passada, casa 2 na 2ª. Retorna a lista de ÍNDICES de compasso na ordem tocada.
-   Nível único (Cromus não aninha repetições); trava anti-loop por segurança.
-
-   Segno/D.S./Fine/Coda (novo): tratados como um salto ADICIONAL, independente do
-   ||: :||, resolvido depois de empurrar o compasso na ordem (mesmo lugar onde
-   repeatEnd decide voltar pro ||:). D.S. dispara NO MÁXIMO 1 vez (doneDS). Depois
-   do D.S. (passDS=true): se o compasso é TO CODA e existe CODA na peça, pula pra
-   lá (1 vez, doneToCoda); se o compasso é FINE, encerra a execução ali. Sem
-   TO CODA/CODA nem FINE presentes, o D.S. simplesmente segue tocando até o fim
-   normal da peça — mesmo comportamento de um D.S. "solto". */
+   Nível único (Cromus não aninha repetições); trava anti-loop por segurança. */
 function unfoldRepeats(measures){
   const order=[];let i=0,repeatStart=0,pass=1,guard=0;const doneEnds=new Set();
-  const segnoIdx  = measures.findIndex(m=>m.segno);
-  const toCodaIdx = measures.findIndex(m=>m.toCoda);
-  const codaIdx   = measures.findIndex(m=>m.coda);
-  let doneDS=false, passDS=false, doneToCoda=false;
   while(i<measures.length){
     if(++guard>100000)break;                 // trava: nunca laçar infinito
     const m=measures[i];
@@ -244,11 +208,6 @@ function unfoldRepeats(measures){
       const v=m.volta;while(i<measures.length&&measures[i].volta===v)i++;continue;}
     order.push(i);
     if(m.repeatEnd&&!doneEnds.has(i)){doneEnds.add(i);pass=2;i=repeatStart;continue;} // :|| → salta 1x p/ o ||:
-    if(passDS&&m.fine)break;                                    // D.S. al Fine: encerra aqui
-    if(passDS&&!doneToCoda&&i===toCodaIdx&&codaIdx>=0){          // D.S. al Coda: pula pro trecho da coda
-      doneToCoda=true;i=codaIdx;continue;}
-    if(!doneDS&&m.dalSegno&&segnoIdx>=0){                        // D.S.: salta de volta pro Segno (1x só)
-      doneDS=true;passDS=true;i=segnoIdx;continue;}
     i++;
   }
   return order;
@@ -261,11 +220,7 @@ function unfoldRepeats(measures){
    abre uma trilha nova; tudo até a próxima marca ou o fim do texto pertence a ela. Numeração
    de violonista (1=corda mais aguda...6=mais grave) — CORDAS/CORDAS_MIDI em
    rng_tab_module.js são indexados 6ª→1ª, daí a inversão. */
-/* N_CORDAS vem de rng_tab_module.js (carregado depois, mas isso só importa
-   em tempo de EXECUÇÃO — por quando essa função roda, os dois módulos já
-   terminaram de carregar). Guard cobre o caso de core.js rodando sozinho
-   (ex.: testes via require) sem rng_tab_module.js no mesmo escopo. */
-function cordaLabelToIndex(n){ return (typeof N_CORDAS!=="undefined"?N_CORDAS:6)-n; }
+function cordaLabelToIndex(n){ return 6-n; }
 function parseVozes(fullSrc,tsNum,tsDen,key){
   const partes=fullSrc.split(/^@corda([1-6]):[ \t]*/m);
   const fatal=[];
