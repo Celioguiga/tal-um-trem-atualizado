@@ -40,6 +40,21 @@ const INSTRUMENTOS = {
     nomes:      ['Sol','Dó','Mi','Lá'],
     nCasas: 12, transposicao: 12, transposicaoAudio: 12,
   },
+  /* Contrabaixo: as cordas são as MESMAS 4 mais graves do violão em nome
+     (Mi Lá Ré Sol), mas soam 2 oitavas abaixo — daí a transposição −24 e não
+     −12. Com −12 o Dó escrito cairia na décima casa da corda Ré: dentro do
+     braço, mas num registro agudo que não é onde um baixo faz melodia; com
+     −24 ele cai na oitava casa da corda Mi grave, uma oitava abaixo do
+     violão, que é a relação real entre os dois instrumentos. Tab e áudio
+     andam juntos aqui (o −12/0 do violão é herança, não modelo).
+     Sem entrada em CAGED_SHAPES de propósito — ver temCaged(). */
+  contrabaixo: {
+    nome: 'Contrabaixo', nCordas: 4,
+    cordas:     [SEMI.E ?? 4, SEMI.A ?? 9, SEMI.D ?? 2, SEMI.G ?? 7],
+    cordasMidi: [28, 33, 38, 43],                   // E1 A1 D2 G2
+    nomes:      ['Mi','Lá','Ré','Sol'],
+    nCasas: 12, transposicao: -24, transposicaoAudio: -24,
+  },
 };
 let INSTRUMENTO_ATUAL   = 'violao';
 let CORDAS              = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordas;
@@ -130,6 +145,15 @@ const CAGED_SHAPES = {
     D: { nome:'Ré (D)',  corda:1, offsetMin:-2, offsetMax:2 },  // corda Dó (acorde de Ré aberto: 2-2-2-0)
   },
 };
+/* CAGED é sistema de acorde dedilhado no braço — não se aplica a todo
+   instrumento. Num contrabaixo, que faz linha de nota única, e em afinação
+   aberta (viola caipira), forçar as cinco letras do violão seria inventar
+   regra. A AUSÊNCIA de tabela em CAGED_SHAPES é a declaração de que o
+   instrumento não tem CAGED; quem pergunta é getTabOpts (app.js), que cai
+   em "mais próxima". Sem isso, CAGED_SHAPES[INSTRUMENTO_ATUAL][shape]
+   estouraria em instrumento sem tabela. */
+function temCaged(key){ return !!CAGED_SHAPES[key || INSTRUMENTO_ATUAL]; }
+
 function casaFundamental(pc, corda){
   for(let f=0; f<=NCASAS; f++) if((CORDAS[corda]+f)%12 === pc) return f;
   return 0;

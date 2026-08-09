@@ -18,8 +18,21 @@ function tonicaPc(key){
   return (SEMI[key.tonicLetter] + sigAlter(key.tonicLetter, key.sig) + 12) % 12;
 }
 function getTabOpts(){
+  /* instrumento sem tabela CAGED (contrabaixo hoje; viola caipira depois) só
+     tem "mais próxima" — ver temCaged() em rng_tab_module.js. Trava aqui, e
+     não só no <select>, pra que um valor de CAGED remanescente de uma troca
+     de instrumento anterior não vaze pra desenhaTabInline. */
+  if(!temCaged()) return {modo:'proxima'};
   const v=$("selModoTab").value;
   return v==='proxima' ? {modo:'proxima'} : {modo:'caged', shape:v};
+}
+/* espelha temCaged() no <select> de tablatura: desabilita as 5 letras e
+   volta pra "mais próxima" quando o instrumento ativo não tem CAGED. */
+function atualizarOpcoesCaged(){
+  const sel=$("selModoTab"); if(!sel) return;
+  const ok=temCaged();
+  [...sel.options].forEach(o=>{ if(o.value!=='proxima') o.disabled=!ok; });
+  if(!ok && sel.value!=='proxima') sel.value='proxima';
 }
 
 /* ---- Instrumento (Violão/Ukulelê, ver INSTRUMENTOS em rng_tab_module.js) ----
@@ -73,6 +86,7 @@ function buildLegend(){
 function render(){
   stopPlayback();
   setInstrumento(instrumentoAtual);
+  atualizarOpcoesCaged();   // depois de setInstrumento: temCaged() lê o instrumento já trocado
   buildLegend();
   const av=$("avisos");av.innerHTML="";
   const box=$("score");box.innerHTML="";
