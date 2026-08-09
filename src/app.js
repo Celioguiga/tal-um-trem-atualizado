@@ -35,10 +35,17 @@ let instrumentoAtual = 'violao';
   if(!tomEl || document.getElementById("instrumento")) return; // sem #tom no shell, ou já existe -- não injeta 2x
   const wrap=document.createElement("span");
   wrap.style.marginLeft="8px";
+  /* opções vêm de INSTRUMENTOS (rng_tab_module.js), não escritas à mão: um
+     instrumento novo aparece no menu só de entrar no registro, sem tocar aqui.
+     A ordem do menu é a ordem de declaração do objeto. */
+  const opcoes=Object.entries(INSTRUMENTOS)
+    .map(([chave,cfg])=>`<option value="${chave}">${cfg.nome}</option>`).join("");
   wrap.innerHTML=`<label style="margin-right:4px">Instrumento:</label>
-    <select id="instrumento"><option value="violao">Violão</option><option value="ukulele">Ukulelê</option></select>`;
+    <select id="instrumento">${opcoes}</select>`;
   tomEl.insertAdjacentElement("afterend", wrap);
-  document.getElementById("instrumento").addEventListener("change",e=>{
+  const sel=document.getElementById("instrumento");
+  sel.value=instrumentoAtual;   // mantém menu e estado alinhados mesmo se o padrão mudar
+  sel.addEventListener("change",e=>{
     instrumentoAtual=e.target.value;
     render();
   });
@@ -197,8 +204,17 @@ function acompanharScroll(idx){
    além de precisar de await (carrega as amostras de forma assíncrona,
    mesmo vindo de data: URI embutido — não há requisição de rede, só
    decodificação). Ver também o segundo ponto em exportWav(). */
+/* Tabela chave-do-INSTRUMENTOS → conjunto de amostras. Instrumentos de corpo
+   parecido COMPARTILHAM o mesmo conjunto de propósito (o Sampler transpõe a
+   diferença de registro sozinho) — é o que segura o tamanho do pacote quando
+   a lista de instrumentos cresce. Chave sem entrada aqui cai no nylon: um
+   instrumento novo toca com timbre aproximado em vez de ficar mudo. */
+const SAMPLES_POR_INSTRUMENTO = {
+  violao:  GUITAR_SAMPLES_NYLON,
+  ukulele: UKULELE_SAMPLES_KALA,
+};
 function samplesDoInstrumento(){
-  return instrumentoAtual==='ukulele' ? UKULELE_SAMPLES_KALA : GUITAR_SAMPLES_NYLON;
+  return SAMPLES_POR_INSTRUMENTO[instrumentoAtual] || GUITAR_SAMPLES_NYLON;
 }
 let synthInstrumento=null; // qual instrumento o `synth` cacheado hoje toca -- troca de instrumento invalida e reconstrói
 function ensureSynth(){

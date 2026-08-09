@@ -265,9 +265,14 @@ function unfoldRepeats(measures){
    em tempo de EXECUÇÃO — por quando essa função roda, os dois módulos já
    terminaram de carregar). Guard cobre o caso de core.js rodando sozinho
    (ex.: testes via require) sem rng_tab_module.js no mesmo escopo. */
-function cordaLabelToIndex(n){ return (typeof N_CORDAS!=="undefined"?N_CORDAS:6)-n; }
+function nCordasAtivo(){ return typeof N_CORDAS!=="undefined"?N_CORDAS:6; }
+function cordaLabelToIndex(n){ return nCordasAtivo()-n; }
 function parseVozes(fullSrc,tsNum,tsDen,key){
-  const partes=fullSrc.split(/^@corda([1-6]):[ \t]*/m);
+  /* Aceita qualquer dígito e VALIDA contra o instrumento ativo, em vez de
+     limitar a regex a [1-6]: com [1-6], um "@corda7:" num violão de 7 cordas
+     não casava o split e virava texto solto na trilha principal — a voz
+     inteira sumia sem erro nenhum. Silêncio é o pior resultado possível aqui. */
+  const partes=fullSrc.split(/^@corda([1-9]):[ \t]*/m);
   const fatal=[];
   const principalParsed=parseCromus(partes[0],tsNum,tsDen);
   const trilhas=[{corda:null,warns:principalParsed.warns,measures:principalParsed.measures,
@@ -277,6 +282,10 @@ function parseVozes(fullSrc,tsNum,tsDen,key){
 
   for(let i=1;i<partes.length;i+=2){
     const n=+partes[i], corpo=partes[i+1]||"";
+    if(n>nCordasAtivo()){
+      fatal.push(`@corda${n}: o instrumento selecionado tem ${nCordasAtivo()} cordas — não existe corda ${n}.`);
+      continue;
+    }
     const p=parseCromus(corpo,tsNum,tsDen);
     if(p.measures.some(m=>m.repeatBegin||m.repeatEnd||m.volta))
       p.warns.push("estrutura de repetição em trilha secundária é ignorada — use a trilha principal.");
@@ -299,4 +308,4 @@ function parseVozes(fullSrc,tsNum,tsDen,key){
   return {trilhas,fatal};
 }
 
-if(typeof module!=="undefined")module.exports={RNG_MAPPER,LETTERS,SEMI,KEYS,keyInfo,sigAlter,degreeToPitch,parseCromus,buildScore,unfoldRepeats,parseVozes,cordaLabelToIndex};
+if(typeof module!=="undefined")module.exports={RNG_MAPPER,LETTERS,SEMI,KEYS,keyInfo,sigAlter,degreeToPitch,parseCromus,buildScore,unfoldRepeats,parseVozes,cordaLabelToIndex,nCordasAtivo};
