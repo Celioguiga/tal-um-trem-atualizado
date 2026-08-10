@@ -55,6 +55,27 @@ const INSTRUMENTOS = {
     nomes:      ['Mi','Lá','Ré','Sol'],
     nCasas: 12, transposicao: -24, transposicaoAudio: -24,
   },
+  /* Viola caipira, afinação RIO ABAIXO (Sol Ré Sol Si Ré, da 5ª ordem à 1ª) —
+     um acorde de Sol aberto. Afinação escolhida pelo Guiga; os NOMES das notas
+     vêm dele, as OITAVAS são inferência (Sol2 a Ré4, registro vizinho ao do
+     violão: a corda mais grave fica só 3 semitons acima do Mi grave dele).
+     Transposição 0: com a viola soando praticamente no mesmo registro do
+     violão, o Dó escrito cai na quinta casa da 3ª ordem — bem no meio do
+     braço — e o áudio soa na mesma altura do violão, que é a relação real
+     entre os dois instrumentos. Tab e áudio andam juntos.
+     Cada ORDEM (par de cordas) é uma linha só na tablatura, prática padrão.
+     As ordens 4ª e 5ª costumam ter as duas cordas em oitavas diferentes entre
+     si; isso muda o BRILHO do som, não a posição no braço, e não está
+     modelado — fica registrado como limitação conhecida.
+     Sem entrada em CAGED_SHAPES: em afinação aberta o sistema de desenhos é
+     outro, forçar as 5 letras do violão seria inventar regra (ver temCaged). */
+  violacaipira: {
+    nome: 'Viola caipira (rio abaixo)', nCordas: 5,
+    cordas:     [SEMI.G ?? 7, SEMI.D ?? 2, SEMI.G ?? 7, SEMI.B ?? 11, SEMI.D ?? 2],
+    cordasMidi: [43, 50, 55, 59, 62],               // G2 D3 G3 B3 D4
+    nomes:      ['Sol','Ré','Sol','Si','Ré'],
+    nCasas: 12, transposicao: 0, transposicaoAudio: 0,
+  },
 };
 let INSTRUMENTO_ATUAL   = 'violao';
 let CORDAS              = INSTRUMENTOS[INSTRUMENTO_ATUAL].cordas;

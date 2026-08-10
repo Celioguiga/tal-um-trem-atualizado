@@ -227,6 +227,19 @@ const SAMPLES_POR_INSTRUMENTO = {
   violao:  GUITAR_SAMPLES_NYLON,
   ukulele: UKULELE_SAMPLES_KALA,
 };
+/* Conjuntos OPCIONAIS: existem só se o arquivo correspondente já tiver sido
+   gerado (tools/extrair_amostras.py) e incluído pelo build.py, que pula os
+   ausentes. O typeof evita ReferenceError — sem ele, um build sem o arquivo
+   quebraria na carga. Enquanto não existe, o instrumento usa o nylon: altura
+   certa, timbre aproximado.
+   O aço é compartilhado de propósito por cavaquinho e viola caipira (o
+   Sampler transpõe o registro) — é o que segura o tamanho do pacote. */
+if(typeof BASS_SAMPLES_ACOUSTIC !== "undefined")
+  SAMPLES_POR_INSTRUMENTO.contrabaixo = BASS_SAMPLES_ACOUSTIC;
+if(typeof STEEL_SAMPLES !== "undefined"){
+  SAMPLES_POR_INSTRUMENTO.violacaipira = STEEL_SAMPLES;
+  SAMPLES_POR_INSTRUMENTO.cavaquinho   = STEEL_SAMPLES;
+}
 function samplesDoInstrumento(){
   return SAMPLES_POR_INSTRUMENTO[instrumentoAtual] || GUITAR_SAMPLES_NYLON;
 }
